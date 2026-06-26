@@ -454,19 +454,17 @@ function drawMinimap() {
 //  CESIUM SETUP + FLIGHT LOOP
 // ====================================================================
 function initViewer() {
-  // Use Cesium Ion default imagery if a token is set; otherwise fall back
-  // to OpenStreetMap so it works with no account at all.
-  let imagery;
-  const hasToken = Cesium.Ion.defaultAccessToken &&
-                   Cesium.Ion.defaultAccessToken.length > 40;
-  if (!hasToken) {
-    imagery = new Cesium.OpenStreetMapImageryProvider({
-      url: "https://tile.openstreetmap.org/"
-    });
-  }
+  // Cesium ships with a demo Ion token that is frequently expired or
+  // rate-limited, which leaves the globe black ("outer space"). On top of
+  // that, the old `imageryProvider` Viewer option was removed in Cesium
+  // 1.10x, so it was being silently ignored. We skip Ion entirely and
+  // always attach OpenStreetMap as the base imagery layer.
+  const osm = new Cesium.OpenStreetMapImageryProvider({
+    url: "https://tile.openstreetmap.org/"
+  });
 
   viewer = new Cesium.Viewer("cesiumContainer", {
-    imageryProvider: imagery,           // undefined => Ion default if token present
+    baseLayer: new Cesium.ImageryLayer(osm),
     baseLayerPicker: false,
     geocoder: false,
     homeButton: false,
