@@ -170,7 +170,7 @@
 <div id="speedPanel">
   <div id="speedVal">500</div>
   <div class="speedCap">KP/H</div>
-  <input id="speedSlider" type="range" min="0" max="1000" value="500" step="10" />
+  <input id="speedSlider" type="range" min="0" max="5000" value="500" step="10" />
   <div class="speedCap">0 = HOVER</div>
 </div>
 
@@ -457,14 +457,21 @@ function initViewer() {
   // Cesium ships with a demo Ion token that is frequently expired or
   // rate-limited, which leaves the globe black ("outer space"). On top of
   // that, the old `imageryProvider` Viewer option was removed in Cesium
-  // 1.10x, so it was being silently ignored. We skip Ion entirely and
-  // always attach OpenStreetMap as the base imagery layer.
-  const osm = new Cesium.OpenStreetMapImageryProvider({
-    url: "https://tile.openstreetmap.org/"
+  // 1.10x, so it was being silently ignored. We skip Ion entirely.
+  //
+  // We also avoid tile.openstreetmap.org here: it does not reliably send
+  // the CORS headers Cesium needs to upload tiles into a WebGL texture
+  // (tiles attach but render blank, especially from a file:// page).
+  // Esri World Imagery is key-free, sends CORS headers, and works as a
+  // plain templated tile source — so it loads on a simple double-click.
+  const baseImagery = new Cesium.UrlTemplateImageryProvider({
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    maximumLevel: 19,
+    credit: "Imagery © Esri, Maxar, Earthstar Geographics",
   });
 
   viewer = new Cesium.Viewer("cesiumContainer", {
-    baseLayer: new Cesium.ImageryLayer(osm),
+    baseLayer: new Cesium.ImageryLayer(baseImagery),
     baseLayerPicker: false,
     geocoder: false,
     homeButton: false,
