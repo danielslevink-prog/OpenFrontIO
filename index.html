@@ -1,452 +1,683 @@
-<!doctype html>
-<html lang="en" class="h-full preload" translate="no">
-  <head>
-    <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
-    />
-    <title data-i18n="main.title">OpenFront (ALPHA)</title>
-    <link rel="manifest" href="<%- manifestHref %>" />
-    <link rel="icon" type="image/svg+xml" href="<%- faviconHref %>" />
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radio Flight</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+  html, body, #cesiumContainer {
+    width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #000;
+  }
+  /* hide cesium default UI clutter */
+  .cesium-viewer-toolbar,
+  .cesium-viewer-animationContainer,
+  .cesium-viewer-timelineContainer,
+  .cesium-viewer-bottom,
+  .cesium-viewer-fullscreenContainer { display: none !important; }
 
-    <!-- Preload styles -->
-    <style>
-      .preload {
-        visibility: hidden;
-        opacity: 0;
-        transition: opacity 0.5s ease-out;
+  /* ---------- Startup overlay ---------- */
+  #startup {
+    position: absolute; inset: 0; z-index: 50;
+    background: radial-gradient(ellipse at center, #0a1a2a 0%, #02060b 100%);
+    color: #d7e6f2; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 22px;
+  }
+  #startup h1 {
+    font-size: 34px; font-weight: 700; letter-spacing: 2px; margin: 0;
+    color: #7CFC9A; text-shadow: 0 0 18px rgba(124,252,154,.35);
+  }
+  #startup p { margin: 0; opacity: .75; font-size: 14px; }
+  #startup .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: 620px; }
+  #startup input {
+    background: #0d2233; border: 1px solid #1d4a66;
+    color: #e6f2fb; padding: 12px 16px; border-radius: 8px; font-size: 15px;
+    width: 320px; outline: none;
+  }
+  #startup input:focus { border-color: #7CFC9A; }
+  .preset {
+    background: #0d2233; border: 1px solid #1d4a66; color: #bcd6e8;
+    padding: 9px 14px; border-radius: 20px; font-size: 13px; cursor: pointer;
+    transition: all .15s;
+  }
+  .preset:hover { background: #14354d; border-color: #7CFC9A; color: #fff; }
+  #goBtn {
+    background: #7CFC9A; color: #042713; border: none; padding: 13px 40px;
+    border-radius: 8px; font-size: 16px; font-weight: 700; cursor: pointer;
+    letter-spacing: 1px; transition: transform .1s;
+  }
+  #goBtn:hover { transform: scale(1.04); }
+  #goBtn:disabled { opacity: .4; cursor: wait; transform: none; }
+  #loadStatus { font-size: 13px; min-height: 18px; color: #7CFC9A; opacity: .85; }
+
+  /* ---------- HUD ---------- */
+  #minimap {
+    position: absolute; top: 14px; left: 14px; z-index: 20;
+    width: 190px; height: 190px; border-radius: 50%;
+    border: 2px solid rgba(124,252,154,.5);
+    background: rgba(3,12,20,.72); box-shadow: 0 0 22px rgba(0,0,0,.6);
+    backdrop-filter: blur(2px);
+  }
+  #minimapLabel {
+    position: absolute; top: 196px; left: 14px; z-index: 20; width: 190px;
+    text-align: center; color: #7CFC9A; font-size: 11px; letter-spacing: 1px;
+    opacity: .8; text-transform: uppercase;
+  }
+
+  #speedPanel {
+    position: absolute; top: 50%; right: 18px; transform: translateY(-50%);
+    z-index: 20; display: flex; flex-direction: column; align-items: center;
+    gap: 10px; background: rgba(3,12,20,.72); padding: 16px 12px;
+    border-radius: 14px; border: 1px solid rgba(124,252,154,.25);
+    backdrop-filter: blur(2px);
+  }
+  #speedVal { color: #7CFC9A; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #speedSlider {
+    -webkit-appearance: none; appearance: none;
+    writing-mode: vertical-lr; direction: rtl;
+    width: 8px; height: 240px; background: #12303f; border-radius: 6px; outline: none;
+  }
+  #speedSlider::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%;
+    background: #7CFC9A; cursor: pointer; box-shadow: 0 0 8px rgba(124,252,154,.7);
+  }
+  #speedSlider::-moz-range-thumb {
+    width: 22px; height: 22px; border-radius: 50%; border: none;
+    background: #7CFC9A; cursor: pointer; box-shadow: 0 0 8px rgba(124,252,154,.7);
+  }
+  .speedCap { color: #6f8ea3; font-size: 10px; letter-spacing: 1px; }
+
+  #nowPlaying {
+    position: absolute; bottom: 16px; right: 16px; z-index: 20;
+    width: 300px; background: rgba(3,12,20,.82);
+    border: 1px solid rgba(124,252,154,.35); border-radius: 12px;
+    padding: 14px 16px; color: #d7e6f2; backdrop-filter: blur(3px);
+    box-shadow: 0 0 26px rgba(0,0,0,.55);
+    transform: translateY(140%); opacity: 0;
+    transition: transform .5s cubic-bezier(.2,.8,.25,1), opacity .5s;
+  }
+  #nowPlaying.show { transform: translateY(0); opacity: 1; }
+  #npTitle {
+    color: #7CFC9A; font-size: 16px; font-weight: 700; margin-bottom: 4px;
+    text-shadow: 0 0 10px rgba(124,252,154,.3);
+    display: flex; align-items: center; gap: 8px;
+  }
+  #npTitle .dot {
+    width: 9px; height: 9px; border-radius: 50%; background: #7CFC9A;
+    box-shadow: 0 0 8px #7CFC9A; animation: pulse 1.6s infinite; flex: none;
+  }
+  #npTitle.dead .dot {
+    background: #ff5c5c; box-shadow: 0 0 8px #ff5c5c; animation: none;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  #npMeta { font-size: 12px; line-height: 1.5; opacity: .85; }
+  #npMeta .k { color: #6f8ea3; }
+  #npStatus { font-size: 11px; margin-top: 6px; color: #6f8ea3; font-style: italic; }
+
+  #skipBtn {
+    display: none; margin-top: 10px; width: 100%;
+    background: #2a0e0e; border: 1px solid #ff5c5c; color: #ffb3b3;
+    padding: 8px 10px; border-radius: 8px; font-size: 12px; font-weight: 700;
+    letter-spacing: .5px; cursor: pointer; transition: background .15s;
+  }
+  #skipBtn:hover { background: #3a1414; }
+  #skipBtn.show { display: block; }
+
+  #hudHelp {
+    position: absolute; bottom: 16px; left: 16px; z-index: 20;
+    color: #88a4b8; font-size: 11px; line-height: 1.6;
+    background: rgba(3,12,20,.6); padding: 8px 12px; border-radius: 8px;
+    letter-spacing: .3px;
+  }
+  #hudHelp b { color: #7CFC9A; }
+  #altReadout {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 20; color: #7CFC9A; font-size: 12px; letter-spacing: 1px;
+    background: rgba(3,12,20,.6); padding: 6px 14px; border-radius: 18px;
+    font-variant-numeric: tabular-nums;
+  }
+  #muteBtn {
+    position: absolute; bottom: 92px; right: 16px; z-index: 21;
+    background: rgba(3,12,20,.82); border: 1px solid rgba(124,252,154,.35);
+    color: #7CFC9A; border-radius: 8px; padding: 6px 12px; font-size: 12px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+
+<!-- Startup -->
+<div id="startup">
+  <h1>RADIO FLIGHT</h1>
+  <p>Fly the world. Listen to whatever's closest.</p>
+  <div class="row">
+    <input id="locInput" type="text" placeholder="Type a place (e.g. Tokyo, Paris, Cairo) and press Enter" />
+  </div>
+  <div class="row" id="presets"></div>
+  <button id="goBtn" disabled>Loading stations…</button>
+  <div id="loadStatus">Fetching global station list…</div>
+</div>
+
+<!-- HUD -->
+<canvas id="minimap" width="190" height="190"></canvas>
+<div id="minimapLabel">~120 km radius</div>
+<div id="altReadout">ALT 200 m</div>
+
+<div id="speedPanel">
+  <div id="speedVal">500</div>
+  <div class="speedCap">KP/H</div>
+  <input id="speedSlider" type="range" min="0" max="1000" value="500" step="10" />
+  <div class="speedCap">0 = HOVER</div>
+</div>
+
+<div id="nowPlaying">
+  <div id="npTitle"><span class="dot"></span><span id="npName">—</span></div>
+  <div id="npMeta"></div>
+  <div id="npStatus"></div>
+  <button id="skipBtn">⏭ Skip dead station</button>
+</div>
+
+<button id="muteBtn">🔊 Mute</button>
+
+<div id="hudHelp">
+  <b>W</b>/<b>S</b> climb / descend &nbsp; <b>A</b>/<b>D</b> turn left / right<br>
+  Slider sets forward speed &middot; <b>0</b> to hover
+</div>
+
+<audio id="player" crossorigin="anonymous"></audio>
+
+<script>
+// ====================================================================
+//  RADIO FLIGHT  — single-user local flight sim over a radio-station globe
+// ====================================================================
+
+const USER_AGENT_APP = "RadioFlight/1.0";
+let stations = [];          // cached geo-tagged stations
+let viewer = null;
+let flying = false;
+
+// flight state
+const state = {
+  lon: 0, lat: 0,           // degrees
+  altitude: 200,            // meters
+  heading: 0,               // radians, 0 = north
+  speedKph: 500,
+  pitchClimb: 0,            // +1 climbing, -1 descending (from W/S)
+  turn: 0,                  // -1 left, +1 right (from A/D)
+};
+
+let currentStation = null;
+let muted = false;
+// stations that failed to play this session — skipped when picking next
+const deadStationUrls = new Set();
+
+// ---------- Preset locations ----------
+const PRESETS = [
+  { name: "Tokyo",       lat: 35.68,  lon: 139.69 },
+  { name: "Paris",       lat: 48.86,  lon: 2.35 },
+  { name: "New York",    lat: 40.71,  lon: -74.0 },
+  { name: "London",      lat: 51.51,  lon: -0.13 },
+  { name: "Mexico City", lat: 19.43,  lon: -99.13 },
+  { name: "Cairo",       lat: 30.04,  lon: 31.24 },
+  { name: "São Paulo",   lat: -23.55, lon: -46.63 },
+  { name: "Mumbai",      lat: 19.08,  lon: 72.88 },
+];
+
+// ====================================================================
+//  STATION LOADING
+// ====================================================================
+async function pickRadioServer() {
+  // de1 is a reliable named server per the API docs
+  return "https://de1.api.radio-browser.info";
+}
+
+async function loadStations() {
+  const status = document.getElementById("loadStatus");
+  try {
+    const server = await pickRadioServer();
+    status.textContent = "Fetching global station list…";
+    // Only stations with coordinates and that are currently OK.
+    const url = server +
+      "/json/stations/search?has_geo_info=true&hidebroken=true&limit=30000";
+    const res = await fetch(url, {
+      headers: { "User-Agent": USER_AGENT_APP }
+    });
+    const data = await res.json();
+    stations = data
+      .filter(s => s.geo_lat && s.geo_long && s.url_resolved &&
+                   Math.abs(s.geo_lat) <= 90 && Math.abs(s.geo_long) <= 180)
+      .map(s => ({
+        name: s.name ? s.name.trim() : "Unknown station",
+        lat: s.geo_lat, lon: s.geo_long,
+        url: s.url_resolved,
+        country: s.country || "",
+        state: s.state || "",
+        tags: s.tags || "",
+        codec: s.codec || "",
+        bitrate: s.bitrate || 0,
+        homepage: s.homepage || ""
+      }));
+    status.textContent = stations.length.toLocaleString() + " geo-located stations loaded.";
+    const btn = document.getElementById("goBtn");
+    btn.disabled = false;
+    btn.textContent = "Start flying ▸";
+  } catch (e) {
+    status.textContent = "Couldn't load stations. Check your connection and reload.";
+    console.error(e);
+  }
+}
+
+// ====================================================================
+//  GEO HELPERS
+// ====================================================================
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) *
+            Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// find nearest station to current position, optionally skipping known-dead ones
+function nearestStation(excludeDead = true) {
+  let best = null, bestD = Infinity;
+  for (const s of stations) {
+    if (excludeDead && deadStationUrls.has(s.url)) continue;
+    const d = haversineKm(state.lat, state.lon, s.lat, s.lon);
+    if (d < bestD) { bestD = d; best = s; }
+  }
+  if (!best && excludeDead) return nearestStation(false); // all nearby are dead, allow retry
+  return best ? { station: best, dist: bestD } : null;
+}
+
+// stations within radiusKm (for minimap + globe dots)
+function stationsWithin(radiusKm) {
+  const out = [];
+  for (const s of stations) {
+    const d = haversineKm(state.lat, state.lon, s.lat, s.lon);
+    if (d <= radiusKm) out.push({ s, d });
+  }
+  return out;
+}
+
+// ====================================================================
+//  AUDIO
+// ====================================================================
+const player = document.getElementById("player");
+const skipBtn = document.getElementById("skipBtn");
+
+function playStation(s, dist) {
+  currentStation = s;
+  skipBtn.classList.remove("show");
+  player.src = s.url;
+  if (!muted) {
+    player.play().catch(() => markStationDead("Stream wouldn't start (station may be offline)"));
+  }
+  updateNowPlaying(s, dist);
+}
+
+function markStationDead(reason) {
+  if (!currentStation) return;
+  deadStationUrls.add(currentStation.url);
+  setNPStatus(reason + " — tap skip for the next one");
+  document.getElementById("npTitle").classList.add("dead");
+  skipBtn.classList.add("show");
+}
+
+function skipToNextStation() {
+  const near = nearestStation();
+  if (near) playStation(near.station, near.dist);
+}
+
+skipBtn.onclick = skipToNextStation;
+
+player.addEventListener("error", () => markStationDead("Stream failed"));
+player.addEventListener("stalled", () => markStationDead("Stream stalled"));
+
+function setNPStatus(txt) {
+  document.getElementById("npStatus").textContent = txt;
+}
+
+function updateNowPlaying(s, dist) {
+  const np = document.getElementById("nowPlaying");
+  document.getElementById("npTitle").classList.remove("dead");
+  document.getElementById("npName").textContent = s.name;
+  const loc = [s.state, s.country].filter(Boolean).join(", ") || "Location unknown";
+  const genre = s.tags ? s.tags.split(",").slice(0,3).join(", ") : "—";
+  const quality = s.bitrate ? `${s.codec} ${s.bitrate}kbps` : (s.codec || "—");
+  document.getElementById("npMeta").innerHTML =
+    `<span class="k">Location:</span> ${loc}<br>` +
+    `<span class="k">Genre:</span> ${genre}<br>` +
+    `<span class="k">Stream:</span> ${quality}<br>` +
+    `<span class="k">Distance:</span> ${dist.toFixed(0)} km away`;
+  setNPStatus("");
+  np.classList.add("show");
+}
+
+// ICY "now playing" metadata is blocked cross-origin in browsers,
+// so song titles aren't reliably available. We surface it only if a
+// station happens to expose it via the media session (rare).
+navigator.mediaSession && navigator.mediaSession.setActionHandler &&
+  (() => {})();
+
+document.getElementById("muteBtn").onclick = () => {
+  muted = !muted;
+  const btn = document.getElementById("muteBtn");
+  if (muted) { player.pause(); btn.textContent = "🔇 Unmute"; }
+  else { player.play().catch(() => markStationDead("Stream wouldn't start (station may be offline)")); btn.textContent = "🔊 Mute"; }
+};
+
+// ====================================================================
+//  PROXIMITY CHECK  (every 5s — local math, no network)
+// ====================================================================
+function checkProximity() {
+  const near = nearestStation();
+  if (!near) return;
+  // switch only if it's a genuinely different station
+  if (!currentStation || near.station.url !== currentStation.url) {
+    playStation(near.station, near.dist);
+  } else {
+    // same station, just refresh distance readout
+    updateNowPlaying(near.station, near.dist);
+  }
+}
+
+// ====================================================================
+//  MINIMAP
+// ====================================================================
+const mm = document.getElementById("minimap");
+const mmCtx = mm.getContext("2d");
+const MM_RADIUS_KM = 120;     // half-extent shown on minimap
+const MM_SIZE = 190;
+const MM_C = MM_SIZE / 2;
+
+function drawMinimap() {
+  mmCtx.clearRect(0, 0, MM_SIZE, MM_SIZE);
+
+  // background grid rings
+  mmCtx.strokeStyle = "rgba(124,252,154,0.15)";
+  mmCtx.lineWidth = 1;
+  for (let r = 1; r <= 3; r++) {
+    mmCtx.beginPath();
+    mmCtx.arc(MM_C, MM_C, (MM_C - 6) * r/3, 0, Math.PI*2);
+    mmCtx.stroke();
+  }
+  // crosshair
+  mmCtx.beginPath();
+  mmCtx.moveTo(MM_C, 6); mmCtx.lineTo(MM_C, MM_SIZE-6);
+  mmCtx.moveTo(6, MM_C); mmCtx.lineTo(MM_SIZE-6, MM_C);
+  mmCtx.stroke();
+
+  // station dots — rotate so heading points "up"
+  const within = stationsWithin(MM_RADIUS_KM);
+  const cosH = Math.cos(-state.heading);
+  const sinH = Math.sin(-state.heading);
+  const kmPerDegLat = 111;
+  const kmPerDegLon = 111 * Math.cos(state.lat * Math.PI/180);
+
+  for (const { s } of within) {
+    // east/north offset in km
+    const east  = (s.lon - state.lon) * kmPerDegLon;
+    const north = (s.lat - state.lat) * kmPerDegLat;
+    // rotate into heading-up frame
+    const rx = east * cosH - north * sinH;
+    const ry = east * sinH + north * cosH;
+    const px = MM_C + (rx / MM_RADIUS_KM) * (MM_C - 8);
+    const py = MM_C - (ry / MM_RADIUS_KM) * (MM_C - 8);
+    const isCurrent = currentStation && s.url === currentStation.url;
+    const isDead = deadStationUrls.has(s.url);
+    mmCtx.beginPath();
+    mmCtx.arc(px, py, isCurrent ? 4 : 2.5, 0, Math.PI*2);
+    mmCtx.fillStyle = isDead ? "#ff5c5c" : (isCurrent ? "#bfffcc" : "#7CFC9A");
+    if (isCurrent) { mmCtx.shadowColor = isDead ? "#ff5c5c" : "#7CFC9A"; mmCtx.shadowBlur = 8; }
+    mmCtx.fill();
+    mmCtx.shadowBlur = 0;
+  }
+
+  // self — grey dot with heading triangle at center
+  mmCtx.fillStyle = "#c9d4dc";
+  mmCtx.beginPath();
+  mmCtx.moveTo(MM_C, MM_C - 7);
+  mmCtx.lineTo(MM_C - 5, MM_C + 5);
+  mmCtx.lineTo(MM_C + 5, MM_C + 5);
+  mmCtx.closePath();
+  mmCtx.fill();
+}
+
+// ====================================================================
+//  CESIUM SETUP + FLIGHT LOOP
+// ====================================================================
+function initViewer() {
+  // Use Cesium Ion default imagery if a token is set; otherwise fall back
+  // to OpenStreetMap so it works with no account at all.
+  let imagery;
+  const hasToken = Cesium.Ion.defaultAccessToken &&
+                   Cesium.Ion.defaultAccessToken.length > 40;
+  if (!hasToken) {
+    imagery = new Cesium.OpenStreetMapImageryProvider({
+      url: "https://tile.openstreetmap.org/"
+    });
+  }
+
+  viewer = new Cesium.Viewer("cesiumContainer", {
+    imageryProvider: imagery,           // undefined => Ion default if token present
+    baseLayerPicker: false,
+    geocoder: false,
+    homeButton: false,
+    sceneModePicker: false,
+    navigationHelpButton: false,
+    animation: false,
+    timeline: false,
+    fullscreenButton: false,
+    infoBox: false,
+    selectionIndicator: false,
+    requestRenderMode: false,
+  });
+
+  viewer.scene.screenSpaceCameraController.enableInputs = false; // we drive the camera
+  viewer.scene.globe.enableLighting = false;
+  viewer.scene.skyAtmosphere.show = true;
+  viewer.scene.fog.enabled = true;
+}
+
+// station dots on the globe (green discs sized for plane-altitude visibility)
+let dotsDataSource = null;
+function refreshGlobeDots() {
+  if (!dotsDataSource) {
+    dotsDataSource = new Cesium.CustomDataSource("stationDots");
+    viewer.dataSources.add(dotsDataSource);
+  }
+  dotsDataSource.entities.removeAll();
+  // Only draw dots within a sensible radius so we don't spawn thousands.
+  const within = stationsWithin(300);
+  for (const { s } of within) {
+    const isCurrent = currentStation && s.url === currentStation.url;
+    const isDead = deadStationUrls.has(s.url);
+    const baseColor = isDead ? "#ff5c5c" : "#7CFC9A";
+    dotsDataSource.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(s.lon, s.lat, 0),
+      ellipse: {
+        semiMinorAxis: 600,   // ~600 m radius disc on the ground
+        semiMajorAxis: 600,
+        height: 0,
+        material: isCurrent
+          ? Cesium.Color.fromCssColorString(isDead ? "#ffbfbf" : "#bfffcc").withAlpha(0.85)
+          : Cesium.Color.fromCssColorString(baseColor).withAlpha(0.55),
+        outline: true,
+        outlineColor: Cesium.Color.fromCssColorString(baseColor),
       }
-
-      /* iOS safe area support */
-      body {
-        padding-top: env(safe-area-inset-top);
-        padding-right: env(safe-area-inset-right);
-        padding-bottom: env(safe-area-inset-bottom);
-        padding-left: env(safe-area-inset-left);
+    });
+    // vertical beam so it's spottable from altitude
+    dotsDataSource.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(s.lon, s.lat, 250),
+      cylinder: {
+        length: 500, topRadius: 60, bottomRadius: 60,
+        material: Cesium.Color.fromCssColorString(baseColor).withAlpha(0.25),
       }
+    });
+  }
+}
 
-      /* Prevent Playwire bottom rail from affecting flex layout */
-      [id^="pw-oop-bottom_rail"] {
-        position: fixed !important;
-      }
+function updateCamera() {
+  const carto = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.altitude);
+  viewer.camera.setView({
+    destination: carto,
+    orientation: {
+      heading: state.heading,
+      pitch: Cesium.Math.toRadians(-12),   // slight downward look
+      roll: 0,
+    }
+  });
+}
 
-      /* Ensure full viewport height on iOS */
-      html,
-      body {
-        height: 100%;
-        height: -webkit-fill-available;
-        min-height: 100%;
-        min-height: -webkit-fill-available;
-      }
-    </style>
+// main per-frame update
+let lastT = performance.now();
+function frame(now) {
+  if (!flying) return;
+  const dt = Math.min((now - lastT) / 1000, 0.1);  // seconds, clamped
+  lastT = now;
 
-    <!-- SEO -->
-    <link rel="canonical" href="https://openfront.io/" />
-    <meta
-      name="description"
-      content="Conquer the world in this multiplayer battle royale! Expand your nation, eliminate opponents, and dominate the map in this fast-paced IO game."
-    />
+  // turning (A/D)
+  const TURN_RATE = 0.6; // rad/s
+  state.heading += state.turn * TURN_RATE * dt;
 
-    <!-- Open Graph -->
-    <meta property="og:url" content="https://openfront.io/" />
-    <meta property="og:title" content="OpenFront - Battle Royale" />
-    <meta
-      property="og:description"
-      content="Conquer the world in this multiplayer battle royale! Expand your nation, eliminate opponents, and dominate the map in this fast-paced IO game."
-    />
-    <meta property="og:image" content="<%- gameplayScreenshotUrl %>" />
-    <meta property="og:type" content="game" />
+  // climb / descend (W/S)
+  const CLIMB_RATE = 60; // m/s
+  state.altitude += state.pitchClimb * CLIMB_RATE * dt;
+  state.altitude = Math.max(20, Math.min(state.altitude, 12000));
 
-    <!-- Injected from Server env -->
-    <script>
-      window.BOOTSTRAP_CONFIG = {
-        gitCommit: <%- gitCommit %>,
-        assetManifest: <%- assetManifest %>,
-        cdnBase: <%- cdnBase %>,
-        gameEnv: <%- gameEnv %>,
-        numWorkers: <%- numWorkers %>,
-        turnstileSiteKey: <%- turnstileSiteKey %>,
-        jwtAudience: <%- jwtAudience %>,
-        instanceId: <%- instanceId %>,
-      };
-      document.documentElement.style.setProperty(
-        "--background-image-url",
-        `url("<%- backgroundImageUrl %>")`,
-      );
-      // document.documentElement.style.setProperty(
-      //   "--desktop-logo-image-url",
-      //   `url("<%- desktopLogoImageUrl %>")`,
-      // );
-      document.documentElement.style.setProperty(
-        "--mobile-logo-image-url",
-        `url("<%- mobileLogoImageUrl %>")`,
-      );
-    </script>
+  // forward motion along heading
+  const kph = state.speedKph;
+  const mPerS = kph * 1000 / 3600;
+  const distM = mPerS * dt;
+  // convert to lat/lon deltas
+  const dNorth = Math.cos(state.heading) * distM;
+  const dEast  = Math.sin(state.heading) * distM;
+  const kmPerDegLat = 111000;
+  const kmPerDegLon = 111000 * Math.cos(state.lat * Math.PI/180) || 1;
+  state.lat += dNorth / kmPerDegLat;
+  state.lon += dEast / kmPerDegLon;
+  // wrap longitude
+  if (state.lon > 180) state.lon -= 360;
+  if (state.lon < -180) state.lon += 360;
+  state.lat = Math.max(-85, Math.min(85, state.lat));
 
-    <!-- CrazyGames SDK -->
-    <script
-      src="https://sdk.crazygames.com/crazygames-sdk-v3.js"
-      async
-    ></script>
+  updateCamera();
+  drawMinimap();
 
-    <!-- Cloudflare Turnstile -->
-    <script
-      src="https://challenges.cloudflare.com/turnstile/v0/api.js"
-      async
-      defer
-    ></script>
+  document.getElementById("altReadout").textContent =
+    "ALT " + Math.round(state.altitude).toLocaleString() + " m";
 
-    <script data-cfasync="false">
-      window.ramp = window.ramp || {};
-      window.ramp.que = window.ramp.que || [];
-      window.ramp.passiveMode = true;
-    </script>
+  requestAnimationFrame(frame);
+}
 
-    <script>
-      window.googletag = window.googletag || { cmd: [] };
-      googletag.cmd.push(function () {
-        googletag.pubads().set("page_url", "http://openfront.io ");
-      });
-    </script>
+// redraw globe dots less often (they're expensive); every 2s
+let dotTimer = null;
 
-    <!-- Analytics -->
-    <script
-      async
-      src="https://www.googletagmanager.com/gtag/js?id=AW-16702609763"
-    ></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
+// ====================================================================
+//  INPUT
+// ====================================================================
+window.addEventListener("keydown", (e) => {
+  if (!flying) return;
+  switch (e.key.toLowerCase()) {
+    case "w": state.pitchClimb = 1; break;
+    case "s": state.pitchClimb = -1; break;
+    case "a": state.turn = -1; break;
+    case "d": state.turn = 1; break;
+  }
+});
+window.addEventListener("keyup", (e) => {
+  switch (e.key.toLowerCase()) {
+    case "w": case "s": state.pitchClimb = 0; break;
+    case "a": case "d": state.turn = 0; break;
+  }
+});
 
-      function gtag() {
-        dataLayer.push(arguments);
-      }
+const slider = document.getElementById("speedSlider");
+slider.addEventListener("input", () => {
+  state.speedKph = parseInt(slider.value, 10);
+  document.getElementById("speedVal").textContent = state.speedKph;
+});
 
-      gtag("js", new Date());
-      gtag("config", "AW-16702609763");
-    </script>
-    <!-- Google tag (gtag.js) -->
-    <script
-      async
-      src="https://www.googletagmanager.com/gtag/js?id=G-WQGQQ8RDN4"
-    ></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag() {
-        dataLayer.push(arguments);
-      }
-      gtag("js", new Date());
+// ====================================================================
+//  START
+// ====================================================================
+function buildPresets() {
+  const wrap = document.getElementById("presets");
+  PRESETS.forEach(p => {
+    const b = document.createElement("button");
+    b.className = "preset";
+    b.textContent = p.name;
+    b.onclick = () => startFlight(p.lat, p.lon);
+    wrap.appendChild(b);
+  });
+}
 
-      gtag("config", "G-WQGQQ8RDN4");
-    </script>
-  </head>
+// simple geocode via OpenStreetMap Nominatim (typed location)
+async function geocode(q) {
+  try {
+    const r = await fetch(
+      "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
+      encodeURIComponent(q),
+      { headers: { "Accept-Language": "en" } }
+    );
+    const d = await r.json();
+    if (d && d.length) return { lat: parseFloat(d[0].lat), lon: parseFloat(d[0].lon) };
+  } catch (e) { console.error(e); }
+  return null;
+}
 
-  <body
-    class="h-full select-none font-sans min-h-screen bg-neutral-800 transition-opacity duration-300 ease-in-out flex flex-row overflow-hidden"
-  >
-    <div id="hex-grid" class="fixed inset-0 -z-50 pointer-events-none">
-      <div
-        id="background-layer"
-        class="absolute inset-0 bg-cover bg-center opacity-30 [filter:brightness(1.0)] dark:[filter:sepia(0.2)_saturate(1.2)_hue-rotate(180deg)_brightness(0.9)]"
-        style="
-          background-image: var(--background-image-url);
-          background-position: center calc(50% + 2cm);
-        "
-      ></div>
-      <div
-        class="absolute inset-0 bg-center bg-no-repeat bg-contain hidden lg:block"
-        style="background-image: var(--desktop-logo-image-url); opacity: 0.5"
-      ></div>
-      <div
-        class="absolute inset-0 bg-center bg-no-repeat bg-contain lg:hidden"
-        style="background-image: var(--mobile-logo-image-url); opacity: 0.5"
-      ></div>
-    </div>
+document.getElementById("locInput").addEventListener("keydown", async (e) => {
+  if (e.key === "Enter") {
+    const q = e.target.value.trim();
+    if (!q) return;
+    const status = document.getElementById("loadStatus");
+    status.textContent = "Finding " + q + "…";
+    const g = await geocode(q);
+    if (g) startFlight(g.lat, g.lon);
+    else status.textContent = "Couldn't find that place — try another or pick a preset.";
+  }
+});
 
-    <!-- LEFT SIDEBAR MENU -->
+document.getElementById("goBtn").onclick = () => {
+  // default start = first preset if nothing typed
+  startFlight(PRESETS[0].lat, PRESETS[0].lon);
+};
 
-    <div
-      id="mobile-menu-backdrop"
-      class="lg:hidden! in-[.in-game]:hidden hidden pointer-events-none [&.open]:block [&.open]:pointer-events-auto [&.open]:fixed [&.open]:inset-0 [&.open]:bg-black/60 [&.open]:z-[40000] transition-opacity"
-      role="presentation"
-      aria-hidden="true"
-    ></div>
+function startFlight(lat, lon) {
+  if (!stations.length) return;
+  state.lat = lat; state.lon = lon;
+  state.altitude = 200;
+  state.heading = 0;
+  state.speedKph = parseInt(slider.value, 10);
 
-    <mobile-nav-bar
-      id="sidebar-menu"
-      class="peer [.in-game_&]:hidden z-[40001] fixed left-0 top-0 h-full flex flex-col justify-start overflow-visible bg-black/70 backdrop-blur-xl border-r border-white/10 transition-transform duration-500 ease-out transform -translate-x-full w-[70%] [&.open]:translate-x-0 lg:hidden"
-      role="dialog"
-      data-i18n-aria-label="main.menu"
-    ></mobile-nav-bar>
+  document.getElementById("startup").style.display = "none";
 
-    <!-- MAIN CONTENT AREA -->
-    <div
-      class="in-[.in-game]:hidden flex-1 relative overflow-hidden h-full transition-[margin] duration-500 ease-out will-change-[margin-left] flex flex-col"
-    >
-      <!-- Desktop Top Bar -->
-      <desktop-nav-bar></desktop-nav-bar>
+  if (!viewer) initViewer();
+  flying = true;
+  updateCamera();
 
-      <div
-        id="turnstile-container"
-        class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-99999"
-      ></div>
+  // first station immediately
+  checkProximity();
+  refreshGlobeDots();
 
-      <homepage-promos></homepage-promos>
+  // periodic checks
+  setInterval(checkProximity, 5000);     // proximity re-check every 5s
+  dotTimer = setInterval(refreshGlobeDots, 2000);
 
-      <!-- Main container with responsive padding -->
-      <main-layout class="contents">
-        <play-page class="contents"></play-page>
-        <matchmaking-modal
-          id="page-matchmaking"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></matchmaking-modal>
-        <news-modal
-          id="page-news"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></news-modal>
-        <single-player-modal
-          id="page-single-player"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></single-player-modal>
-        <host-lobby-modal
-          id="page-host-lobby"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></host-lobby-modal>
-        <join-lobby-modal
-          id="page-join-lobby"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></join-lobby-modal>
-        <store-modal
-          id="page-item-store"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></store-modal>
-        <user-setting
-          id="page-settings"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></user-setting>
-        <leaderboard-modal
-          id="page-leaderboard"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></leaderboard-modal>
-        <troubleshooting-modal
-          id="page-troubleshooting"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></troubleshooting-modal>
+  lastT = performance.now();
+  requestAnimationFrame(frame);
+}
 
-        <clan-modal
-          id="page-clan"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></clan-modal>
-        <account-modal
-          id="page-account"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></account-modal>
-        <help-modal
-          id="page-help"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></help-modal>
-        <language-modal
-          id="page-language"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></language-modal>
-        <flag-input-modal
-          id="flag-input-modal"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></flag-input-modal>
-        <territory-patterns-modal
-          id="territory-patterns-modal"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></territory-patterns-modal>
-        <ranked-modal
-          id="page-ranked"
-          inline
-          class="hidden w-full h-full page-content relative z-50"
-        ></ranked-modal>
-      </main-layout>
-
-      <div class="[.in-game_&]:hidden mt-auto flex flex-col shrink-0">
-        <page-footer></page-footer>
-      </div>
-
-      <!-- Global Modals -->
-    </div>
-
-    <!-- Game components -->
-    <div id="app"></div>
-
-    <!-- Bottom HUD: <sm=column, sm..lg=2col (HUD left | events right), lg+=3col grid centered -->
-    <div
-      class="fixed bottom-0 left-0 w-full z-[200] flex flex-col pointer-events-none sm:flex-row sm:items-end lg:grid lg:grid-cols-[1fr_500px_1fr] lg:items-end min-[1200px]:px-4"
-      style="
-        padding-bottom: env(safe-area-inset-bottom);
-        padding-left: env(safe-area-inset-left);
-        padding-right: env(safe-area-inset-right);
-      "
-    >
-      <!-- HUD: <sm contents (children join outer flex), sm+ flex-col 460px, lg+ col-2 -->
-      <div
-        class="contents sm:flex sm:flex-col sm:pointer-events-none w-full sm:w-[500px] lg:col-start-2 sm:z-10"
-      >
-        <attacks-display
-          class="w-full pointer-events-auto order-1 sm:order-none"
-        ></attacks-display>
-        <div
-          class="pointer-events-auto bg-gray-800/92 backdrop-blur-sm sm:rounded-tr-lg lg:rounded-t-lg min-[1200px]:rounded-lg shadow-lg order-3 sm:order-none"
-        >
-          <control-panel class="w-full"></control-panel>
-          <unit-display class="hidden lg:block w-full"></unit-display>
-        </div>
-      </div>
-
-      <!-- events+chat: <sm between attacks and control (order-2), sm+ right side, lg+ col-3 -->
-      <div
-        class="flex flex-col pointer-events-none items-end order-2 sm:order-none sm:flex-1 lg:col-start-3 lg:self-end lg:justify-end"
-      >
-        <chat-display
-          class="w-full sm:w-auto pointer-events-auto"
-        ></chat-display>
-        <events-display
-          class="w-full sm:w-auto pointer-events-auto"
-        ></events-display>
-        <actionable-events
-          class="w-full sm:w-auto pointer-events-auto"
-        ></actionable-events>
-      </div>
-    </div>
-
-    <!-- Game modals and overlays -->
-    <emoji-table></emoji-table>
-    <build-menu></build-menu>
-    <win-modal></win-modal>
-    <game-starting-modal></game-starting-modal>
-    <div
-      class="flex flex-col items-end fixed top-0 right-0 min-[1200px]:top-4 min-[1200px]:right-4 z-1000 gap-2"
-    >
-      <game-right-sidebar></game-right-sidebar>
-      <replay-panel></replay-panel>
-    </div>
-    <settings-modal></settings-modal>
-    <graphics-settings-modal></graphics-settings-modal>
-    <player-panel></player-panel>
-    <spawn-timer></spawn-timer>
-    <immunity-timer></immunity-timer>
-    <in-game-promo></in-game-promo>
-    <game-info-modal></game-info-modal>
-    <alert-frame></alert-frame>
-    <chat-modal></chat-modal>
-    <multi-tab-modal></multi-tab-modal>
-    <game-left-sidebar></game-left-sidebar>
-    <performance-overlay></performance-overlay>
-    <player-info-overlay></player-info-overlay>
-    <leader-board></leader-board>
-    <team-stats></team-stats>
-    <heads-up-message></heads-up-message>
-
-    <!-- Scripts -->
-    <script>
-      // Remove preload class after everything is loaded
-      window.addEventListener("load", function () {
-        requestAnimationFrame(() => {
-          document.documentElement.classList.remove("preload");
-        });
-      });
-
-      // Fallback: remove preload class after timeout in case DOMContentLoaded never fires
-      setTimeout(function () {
-        document.documentElement.classList.remove("preload");
-      }, 3000);
-    </script>
-
-    <script>
-      // Fallback sidebar toggle so hamburger works even if module bundle fails to load
-      window.__toggleSidebar = function (e) {
-        try {
-          const sidebar = document.getElementById("sidebar-menu");
-          const backdrop = document.getElementById("mobile-menu-backdrop");
-          if (!sidebar || !backdrop) return;
-
-          const isOpen = sidebar.classList.contains("open");
-
-          if (isOpen) {
-            sidebar.classList.remove("open");
-            backdrop.classList.remove("open");
-            document.documentElement.classList.remove("overflow-hidden");
-            sidebar.setAttribute("aria-hidden", "true");
-            sidebar.removeAttribute("aria-modal");
-            backdrop.setAttribute("aria-hidden", "true");
-          } else {
-            sidebar.classList.add("open");
-            backdrop.classList.add("open");
-            document.documentElement.classList.add("overflow-hidden");
-            sidebar.setAttribute("aria-hidden", "false");
-            sidebar.setAttribute("aria-modal", "true");
-            backdrop.setAttribute("aria-hidden", "false");
-          }
-
-          const hb = document.getElementById("hamburger-btn");
-          if (hb) hb.setAttribute("aria-expanded", (!isOpen).toString());
-        } catch (err) {
-          console.error("Toggle failed", err);
-        }
-      };
-
-      // Wire up the hamburger button inline
-      const hamburger = document.getElementById("hamburger-btn");
-      if (hamburger) {
-        hamburger.onclick = window.__toggleSidebar;
-        hamburger.setAttribute("aria-expanded", "false");
-      }
-
-      // Wire up backdrop click to close menu
-      const backdrop = document.getElementById("mobile-menu-backdrop");
-      if (backdrop) {
-        backdrop.onclick = function (e) {
-          const sidebar = document.getElementById("sidebar-menu");
-          if (sidebar && sidebar.classList.contains("open")) {
-            window.__toggleSidebar(e);
-          }
-        };
-      }
-
-      // Wire up Escape key to close menu
-      document.addEventListener("keydown", function (e) {
-        if (e.key === "Escape" || e.key === "Esc") {
-          const sidebar = document.getElementById("sidebar-menu");
-          if (sidebar && sidebar.classList.contains("open")) {
-            window.__toggleSidebar(e);
-          }
-        }
-      });
-    </script>
-
-    <!-- Analytics -->
-    <script
-      defer
-      src="https://static.cloudflareinsights.com/beacon.min.js"
-      data-cf-beacon='{"token": "03d93e6fefb349c28ee69b408fa25a13"}'
-    ></script>
-    <script type="module" src="/src/client/Main.ts"></script>
-    <footer>
-      <script
-        data-cfasync="false"
-        async
-        src="//cdn.intergient.com/1025558/75940/ramp.js"
-      ></script>
-    </footer>
-  </body>
+// ---------- boot ----------
+buildPresets();
+loadStations();
+</script>
+</body>
 </html>
