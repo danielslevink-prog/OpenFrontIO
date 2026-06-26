@@ -453,25 +453,28 @@ function drawMinimap() {
 // ====================================================================
 //  CESIUM SETUP + FLIGHT LOOP
 // ====================================================================
-function initViewer() {
-  // Cesium ships with a demo Ion token that is frequently expired or
-  // rate-limited, which leaves the globe black ("outer space"). On top of
-  // that, the old `imageryProvider` Viewer option was removed in Cesium
-  // 1.10x, so it was being silently ignored. We skip Ion entirely.
-  //
-  // We also avoid tile.openstreetmap.org here: it does not reliably send
-  // the CORS headers Cesium needs to upload tiles into a WebGL texture
-  // (tiles attach but render blank, especially from a file:// page).
-  // Esri World Imagery is key-free, sends CORS headers, and works as a
-  // plain templated tile source — so it loads on a simple double-click.
-  const baseImagery = new Cesium.UrlTemplateImageryProvider({
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    maximumLevel: 19,
-    credit: "Imagery © Esri, Maxar, Earthstar Geographics",
-  });
+async function makeBaseLayer() {
+  // Public tile servers like OSM and Esri's raw ArcGIS endpoints display
+  // fine as plain <img> tags but commonly omit the CORS headers WebGL
+  // needs to upload them as textures, so the globe attaches the layer
+  // but renders blank. Cesium's own Ion CDN is built to support this and
+  // sends correct CORS headers, so we use Ion's default world imagery via
+  // the bundled demo access token instead of a raw tile URL template.
+  try {
+    return await Cesium.createWorldImageryAsync();
+  } catch (e) {
+    console.error("Ion imagery failed, falling back to Esri", e);
+    return Cesium.ImageryLayer.fromProviderAsync(
+      Cesium.IonImageryProvider.fromAssetId(3) // Esri World Imagery hosted on Ion (CORS-correct)
+    );
+  }
+}
+
+async function initViewer() {
+  const baseImagery = await makeBaseLayer();
 
   viewer = new Cesium.Viewer("cesiumContainer", {
-    baseLayer: new Cesium.ImageryLayer(baseImagery),
+    baseLayer: baseImagery,
     baseLayerPicker: false,
     geocoder: false,
     homeButton: false,
@@ -655,7 +658,7 @@ document.getElementById("goBtn").onclick = () => {
   startFlight(PRESETS[0].lat, PRESETS[0].lon);
 };
 
-function startFlight(lat, lon) {
+async function startFlight(lat, lon) {
   if (!stations.length) return;
   state.lat = lat; state.lon = lon;
   state.altitude = 200;
@@ -664,7 +667,7 @@ function startFlight(lat, lon) {
 
   document.getElementById("startup").style.display = "none";
 
-  if (!viewer) initViewer();
+  if (!viewer) await initViewer();
   flying = true;
   updateCamera();
 
