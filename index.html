@@ -147,7 +147,8 @@
     background: rgba(3,12,20,.72); padding: 6px 14px; border-radius: 18px;
     font-variant-numeric: tabular-nums; white-space: nowrap;
   }
-  .maplibregl-ctrl-attrib { font-size: 10px; }
+  /* wrap the credits so they stay in the corner instead of running under the altitude readout */
+  .maplibregl-ctrl-attrib { font-size: 10px; max-width: 300px; }
 </style>
 </head>
 <body>
@@ -218,7 +219,13 @@ const RADIO_SERVERS = [
 const IMAGERY_URL =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 
-const CAMERA_PITCH = 78;              // degrees from straight down, i.e. 12° below the horizon
+// AWS Terrain Tiles (Terrarium encoding): global elevation, key-free, CORS-enabled.
+const TERRAIN_TILE_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+// OpenFreeMap: key-free OpenMapTiles vector tiles, used here for 3D buildings.
+const BUILDINGS_TILEJSON = "https://tiles.openfreemap.org/planet";
+const TERRAIN_EXAGGERATION = 1.3;
+
+const CAMERA_PITCH = 78;             // degrees from straight down, i.e. 12° below the horizon
 const MIN_ALT = 20, MAX_ALT = 12000;  // metres
 const TURN_RATE = 0.6;                // rad/s
 const MM_RADIUS_KM = 120;             // half-extent shown on the minimap
@@ -646,11 +653,39 @@ function setStationFeatureState(s, featureState) {
   }
 }
 
+// The terrain tiles include ocean-floor depths, which would sink the sea kilometres
+// below the coast (cliffs at every shoreline, islands as giant spires). This
+// protocol fetches each tile and flattens everything below sea level to 0 m.
+function registerLandOnlyTerrain() {
+  maplibregl.addProtocol("landdem", async (params, abortController) => {
+    const [z, x, y] = params.url.slice("landdem://".length).split("/");
+    const url = TERRAIN_TILE_URL.replace("{z}", z).replace("{x}", x).replace("{y}", y);
+    const res = await fetch(url, { signal: abortController.signal });
+    if (!res.ok) throw new Error(`Terrain tile HTTP ${res.status}`);
+    const bitmap = await createImageBitmap(await res.blob(),
+      { colorSpaceConversion: "none", premultiplyAlpha: "none" });  // keep the encoded values exact
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(bitmap, 0, 0);
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const px = img.data;
+    // Terrarium: metres = R * 256 + G + B / 256 - 32768, so R < 128 means below sea level.
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i] < 128) { px[i] = 128; px[i + 1] = 0; px[i + 2] = 0; }
+    }
+    ctx.putImageData(img, 0, 0);
+    const blob = await canvas.convertToBlob({ type: "image/png" });
+    return { data: await blob.arrayBuffer() };
+  });
+}
+
 function initMap() {
+  registerLandOnlyTerrain();
   map = new maplibregl.Map({
     container: "map",
     interactive: false,          // the flight controls drive the camera
     maxPitch: 85,
+    centerClampedToGround: false, // we place the camera exactly; don't let the map re-clamp it
     attributionControl: false,
     center: [state.lon, state.lat],
     zoom: 14,
@@ -661,9 +696,21 @@ function initMap() {
           type: "raster", tiles: [IMAGERY_URL], tileSize: 256, maxzoom: 18,
           attribution: "Imagery © Esri, Maxar, Earthstar Geographics",
         },
+        dem: {
+          type: "raster-dem", tiles: ["landdem://{z}/{x}/{y}"], tileSize: 256, maxzoom: 15,
+          encoding: "terrarium",
+          attribution: "Terrain: Mapzen / AWS Terrain Tiles",
+        },
+        // same tiles again: MapLibre renders hillshade better from its own source
+        hillshadeDem: {
+          type: "raster-dem", tiles: ["landdem://{z}/{x}/{y}"], tileSize: 256, maxzoom: 15,
+          encoding: "terrarium",
+        },
+        buildings: { type: "vector", url: BUILDINGS_TILEJSON },
         stations: { type: "geojson", data: stationPointsGeoJSON() },
         beams: { type: "geojson", data: stationBeamsGeoJSON() },
       },
+      terrain: { source: "dem", exaggeration: TERRAIN_EXAGGERATION },
       sky: {
         "sky-color": "#5fa8e8",
         "horizon-color": "#d6e9f7",
@@ -674,6 +721,24 @@ function initMap() {
       },
       layers: [
         { id: "imagery", type: "raster", source: "imagery" },
+        {
+          id: "hillshade", type: "hillshade", source: "hillshadeDem",
+          paint: {
+            "hillshade-exaggeration": 0.3,
+            "hillshade-shadow-color": "#1a2433",
+            "hillshade-highlight-color": "#fff8e6",
+          },
+        },
+        {
+          id: "buildings", type: "fill-extrusion", source: "buildings", "source-layer": "building",
+          minzoom: 13,
+          paint: {
+            "fill-extrusion-color": "#d8d2c6",
+            "fill-extrusion-height": ["coalesce", ["get", "render_height"], 8],
+            "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+            "fill-extrusion-opacity": 0.9,
+          },
+        },
         {
           id: "beams", type: "fill-extrusion", source: "beams", minzoom: 9,
           paint: {
@@ -710,16 +775,47 @@ function initMap() {
   updateCamera();
 }
 
+// Ground height under the plane (already scaled by the terrain exaggeration).
+// state.altitude is height above this, so the plane follows hills and mountains.
+let groundElev = 0;
+let groundKnown = false;
+
+function updateGround(dt) {
+  // also sample ~1.5 s ahead so we climb before a slope instead of into it
+  const aheadM = Math.min(3000, state.speedKph / 3.6 * 1.5);
+  const ahead = [
+    wrapLon(state.lon + Math.sin(state.heading) * aheadM / (111320 * Math.max(0.01, Math.cos(toRad(state.lat))))),
+    state.lat + Math.cos(state.heading) * aheadM / 111320,
+  ];
+  const samples = [map.queryTerrainElevation([state.lon, state.lat]), map.queryTerrainElevation(ahead)]
+    .filter((v) => v != null && isFinite(v));
+  if (!samples.length) return;
+  const target = Math.max(...samples);
+  if (!groundKnown) {
+    if (target === 0) return;   // terrain tiles not in yet (or open sea): keep waiting
+    groundElev = target;
+    groundKnown = true;
+    return;
+  }
+  const rate = target > groundElev ? 6 : 1.5;   // rise quickly, sink gently
+  groundElev += (target - groundElev) * Math.min(1, rate * dt);
+}
+
 function updateCamera() {
+  // The camera helper solves against the map's current centre elevation, so
+  // keep that at ground level to get a sensible look-at point.
+  map.setCenterElevation(groundElev);
   const cam = map.calculateCameraOptionsFromCameraLngLatAltRotation(
-    [state.lon, state.lat], state.altitude, toDeg(state.heading), CAMERA_PITCH);
+    [state.lon, state.lat], groundElev + state.altitude, toDeg(state.heading), CAMERA_PITCH);
   // Pass fields explicitly: jumpTo throws on the undefined `roll` this helper returns.
-  map.jumpTo({ center: cam.center, zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch });
+  map.jumpTo({
+    center: cam.center, zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch, elevation: cam.elevation,
+  });
 }
 
 let lastT = performance.now();
 function frame(now) {
-  const dt = Math.min((now - lastT) / 1000, 0.1);  // seconds, clamped
+  const dt = Math.min((now - lastT) / 1000, 0.25);  // seconds, clamped (keeps speed true down to ~4 fps)
   lastT = now;
 
   state.heading += state.turn * TURN_RATE * dt;
@@ -735,10 +831,11 @@ function frame(now) {
   state.lon = wrapLon(state.lon);
   state.lat = Math.max(-84, Math.min(84, state.lat));   // web-mercator limit
 
+  updateGround(dt);
   updateCamera();
   drawMinimap();
   $("altReadout").textContent =
-    "ALT " + Math.round(state.altitude).toLocaleString() + " m · HDG " +
+    "ALT " + Math.round(state.altitude).toLocaleString() + " m above ground · HDG " +
     String(Math.round(toDeg(state.heading)) % 360).padStart(3, "0") + "°";
 
   requestAnimationFrame(frame);
