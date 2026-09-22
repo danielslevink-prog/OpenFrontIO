@@ -4,27 +4,25 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Radio Flight</title>
-<script src="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Cesium.js"></script>
-<link href="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<!-- MapLibre GL v5 bundles its web worker inline, so the map renders even when
+     this file is opened straight from disk (file://). CesiumJS, used before,
+     can't start its globe workers from a file:// page and only shows space. -->
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css" rel="stylesheet">
 <style>
-  html, body, #cesiumContainer {
+  html, body, #map {
     width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
     font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-    background: #000;
+    background: #02060b;
   }
-  /* hide cesium default UI clutter */
-  .cesium-viewer-toolbar,
-  .cesium-viewer-animationContainer,
-  .cesium-viewer-timelineContainer,
-  .cesium-viewer-bottom,
-  .cesium-viewer-fullscreenContainer { display: none !important; }
+  [hidden] { display: none !important; }
 
   /* ---------- Startup overlay ---------- */
   #startup {
     position: absolute; inset: 0; z-index: 50;
     background: radial-gradient(ellipse at center, #0a1a2a 0%, #02060b 100%);
     color: #d7e6f2; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 22px;
+    align-items: center; justify-content: center; gap: 22px; padding: 0 16px;
   }
   #startup h1 {
     font-size: 34px; font-weight: 700; letter-spacing: 2px; margin: 0;
@@ -35,7 +33,7 @@
   #startup input {
     background: #0d2233; border: 1px solid #1d4a66;
     color: #e6f2fb; padding: 12px 16px; border-radius: 8px; font-size: 15px;
-    width: 320px; outline: none;
+    width: 320px; max-width: 100%; outline: none;
   }
   #startup input:focus { border-color: #7CFC9A; }
   .preset {
@@ -51,7 +49,7 @@
   }
   #goBtn:hover { transform: scale(1.04); }
   #goBtn:disabled { opacity: .4; cursor: wait; transform: none; }
-  #loadStatus { font-size: 13px; min-height: 18px; color: #7CFC9A; opacity: .85; }
+  #loadStatus { font-size: 13px; min-height: 18px; color: #7CFC9A; opacity: .85; text-align: center; }
 
   /* ---------- HUD ---------- */
   #minimap {
@@ -59,42 +57,49 @@
     width: 190px; height: 190px; border-radius: 50%;
     border: 2px solid rgba(124,252,154,.5);
     background: rgba(3,12,20,.72); box-shadow: 0 0 22px rgba(0,0,0,.6);
-    backdrop-filter: blur(2px);
   }
   #minimapLabel {
-    position: absolute; top: 196px; left: 14px; z-index: 20; width: 190px;
+    position: absolute; top: 210px; left: 14px; z-index: 20; width: 194px;
     text-align: center; color: #7CFC9A; font-size: 11px; letter-spacing: 1px;
     opacity: .8; text-transform: uppercase;
+    text-shadow: 0 1px 3px rgba(0,0,0,.8);
   }
 
   #speedPanel {
-    position: absolute; top: 50%; right: 18px; transform: translateY(-50%);
-    z-index: 20; display: flex; flex-direction: column; align-items: center;
+    position: absolute; top: 64px; right: 18px; z-index: 20;
+    display: flex; flex-direction: column; align-items: center;
     gap: 10px; background: rgba(3,12,20,.72); padding: 16px 12px;
     border-radius: 14px; border: 1px solid rgba(124,252,154,.25);
-    backdrop-filter: blur(2px);
   }
   #speedVal { color: #7CFC9A; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  /* A rotated horizontal slider: vertical range inputs aren't supported by
+     every Safari version, a transform is. */
+  .sliderWrap { position: relative; width: 28px; height: 240px; }
   #speedSlider {
-    -webkit-appearance: none; appearance: none;
-    writing-mode: vertical-lr; direction: rtl;
-    width: 8px; height: 240px; background: #12303f; border-radius: 6px; outline: none;
+    -webkit-appearance: none; appearance: none; background: transparent;
+    position: absolute; left: 50%; top: 50%; margin: 0;
+    width: 240px; height: 28px;
+    transform: translate(-50%, -50%) rotate(-90deg);
+    outline: none; cursor: pointer;
   }
+  #speedSlider::-webkit-slider-runnable-track { height: 8px; background: #12303f; border-radius: 6px; }
+  #speedSlider::-moz-range-track { height: 8px; background: #12303f; border-radius: 6px; }
   #speedSlider::-webkit-slider-thumb {
-    -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%;
-    background: #7CFC9A; cursor: pointer; box-shadow: 0 0 8px rgba(124,252,154,.7);
+    -webkit-appearance: none; width: 22px; height: 22px; margin-top: -7px; border-radius: 50%;
+    background: #7CFC9A; box-shadow: 0 0 8px rgba(124,252,154,.7);
   }
   #speedSlider::-moz-range-thumb {
     width: 22px; height: 22px; border-radius: 50%; border: none;
-    background: #7CFC9A; cursor: pointer; box-shadow: 0 0 8px rgba(124,252,154,.7);
+    background: #7CFC9A; box-shadow: 0 0 8px rgba(124,252,154,.7);
   }
   .speedCap { color: #6f8ea3; font-size: 10px; letter-spacing: 1px; }
 
   #nowPlaying {
     position: absolute; bottom: 16px; right: 16px; z-index: 20;
-    width: 300px; background: rgba(3,12,20,.82);
+    width: 300px; max-width: calc(100% - 32px); box-sizing: border-box;
+    background: rgba(3,12,20,.82);
     border: 1px solid rgba(124,252,154,.35); border-radius: 12px;
-    padding: 14px 16px; color: #d7e6f2; backdrop-filter: blur(3px);
+    padding: 14px 16px; color: #d7e6f2;
     box-shadow: 0 0 26px rgba(0,0,0,.55);
     transform: translateY(140%); opacity: 0;
     transition: transform .5s cubic-bezier(.2,.8,.25,1), opacity .5s;
@@ -105,50 +110,48 @@
     text-shadow: 0 0 10px rgba(124,252,154,.3);
     display: flex; align-items: center; gap: 8px;
   }
+  #npName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #npTitle .dot {
     width: 9px; height: 9px; border-radius: 50%; background: #7CFC9A;
     box-shadow: 0 0 8px #7CFC9A; animation: pulse 1.6s infinite; flex: none;
   }
-  #npTitle.dead .dot {
-    background: #ff5c5c; box-shadow: 0 0 8px #ff5c5c; animation: none;
-  }
+  #npTitle.dead { color: #ffb3b3; }
+  #npTitle.dead .dot { background: #ff5c5c; box-shadow: 0 0 8px #ff5c5c; animation: none; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
   #npMeta { font-size: 12px; line-height: 1.5; opacity: .85; }
+  #npMeta div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #npMeta .k { color: #6f8ea3; }
-  #npStatus { font-size: 11px; margin-top: 6px; color: #6f8ea3; font-style: italic; }
+  #npStatus { font-size: 11px; margin-top: 6px; color: #6f8ea3; font-style: italic; min-height: 14px; }
+  #nowPlaying.isDead #npStatus { color: #ffb3b3; }
 
-  #skipBtn {
-    display: none; margin-top: 10px; width: 100%;
-    background: #2a0e0e; border: 1px solid #ff5c5c; color: #ffb3b3;
-    padding: 8px 10px; border-radius: 8px; font-size: 12px; font-weight: 700;
-    letter-spacing: .5px; cursor: pointer; transition: background .15s;
+  .npButtons { display: flex; gap: 8px; margin-top: 10px; }
+  .npButtons button {
+    flex: 1; border-radius: 8px; padding: 7px 10px; font-size: 12px;
+    font-weight: 700; letter-spacing: .3px; cursor: pointer; transition: background .15s;
   }
+  #muteBtn { flex: 0 0 auto; background: #0d2233; border: 1px solid rgba(124,252,154,.35); color: #7CFC9A; }
+  #muteBtn:hover { background: #14354d; }
+  #skipBtn { background: #2a0e0e; border: 1px solid #ff5c5c; color: #ffb3b3; }
   #skipBtn:hover { background: #3a1414; }
-  #skipBtn.show { display: block; }
 
   #hudHelp {
     position: absolute; bottom: 16px; left: 16px; z-index: 20;
     color: #88a4b8; font-size: 11px; line-height: 1.6;
-    background: rgba(3,12,20,.6); padding: 8px 12px; border-radius: 8px;
+    background: rgba(3,12,20,.72); padding: 8px 12px; border-radius: 8px;
     letter-spacing: .3px;
   }
   #hudHelp b { color: #7CFC9A; }
   #altReadout {
     position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
     z-index: 20; color: #7CFC9A; font-size: 12px; letter-spacing: 1px;
-    background: rgba(3,12,20,.6); padding: 6px 14px; border-radius: 18px;
-    font-variant-numeric: tabular-nums;
+    background: rgba(3,12,20,.72); padding: 6px 14px; border-radius: 18px;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
   }
-  #muteBtn {
-    position: absolute; bottom: 92px; right: 16px; z-index: 21;
-    background: rgba(3,12,20,.82); border: 1px solid rgba(124,252,154,.35);
-    color: #7CFC9A; border-radius: 8px; padding: 6px 12px; font-size: 12px;
-    cursor: pointer;
-  }
+  .maplibregl-ctrl-attrib { font-size: 10px; }
 </style>
 </head>
 <body>
-<div id="cesiumContainer"></div>
+<div id="map"></div>
 
 <!-- Startup -->
 <div id="startup">
@@ -169,53 +172,59 @@
 
 <div id="speedPanel">
   <div id="speedVal">500</div>
-  <div class="speedCap">KP/H</div>
-  <input id="speedSlider" type="range" min="0" max="5000" value="500" step="10" />
+  <div class="speedCap">KM/H</div>
+  <div class="sliderWrap">
+    <input id="speedSlider" type="range" min="0" max="5000" value="500" step="10" aria-label="Speed in km/h" />
+  </div>
   <div class="speedCap">0 = HOVER</div>
 </div>
 
 <div id="nowPlaying">
   <div id="npTitle"><span class="dot"></span><span id="npName">—</span></div>
-  <div id="npMeta"></div>
+  <div id="npMeta">
+    <div><span class="k">Location:</span> <span id="npLoc"></span></div>
+    <div><span class="k">Genre:</span> <span id="npGenre"></span></div>
+    <div><span class="k">Stream:</span> <span id="npStream"></span></div>
+    <div><span class="k">Distance:</span> <span id="npDist"></span></div>
+  </div>
   <div id="npStatus"></div>
-  <button id="skipBtn">⏭ Skip dead station</button>
+  <div class="npButtons">
+    <button id="muteBtn">🔊 Mute</button>
+    <button id="skipBtn" hidden>⏭ Skip dead station</button>
+  </div>
 </div>
 
-<button id="muteBtn">🔊 Mute</button>
-
 <div id="hudHelp">
-  <b>W</b>/<b>S</b> climb / descend &nbsp; <b>A</b>/<b>D</b> turn left / right<br>
+  <b>W</b>/<b>S</b> or <b>↑</b>/<b>↓</b> climb / descend &nbsp; <b>A</b>/<b>D</b> or <b>←</b>/<b>→</b> turn<br>
   Slider sets forward speed &middot; <b>0</b> to hover
 </div>
 
-<audio id="player" crossorigin="anonymous"></audio>
+<audio id="player" preload="none"></audio>
 
 <script>
+"use strict";
 // ====================================================================
-//  RADIO FLIGHT  — single-user local flight sim over a radio-station globe
+//  RADIO FLIGHT — single-user flight sim over a radio-station map
 // ====================================================================
 
-const USER_AGENT_APP = "RadioFlight/1.0";
-let stations = [];          // cached geo-tagged stations
-let viewer = null;
-let flying = false;
+const RADIO_SERVERS = [
+  "https://de1.api.radio-browser.info",
+  "https://de2.api.radio-browser.info",
+  "https://fi1.api.radio-browser.info",
+  "https://all.api.radio-browser.info",
+];
+// Esri World Imagery: key-free, CORS-enabled, and (unlike OSM's tile servers)
+// doesn't reject requests from file:// pages that send no Referer.
+const IMAGERY_URL =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 
-// flight state
-const state = {
-  lon: 0, lat: 0,           // degrees
-  altitude: 200,            // meters
-  heading: 0,               // radians, 0 = north
-  speedKph: 500,
-  pitchClimb: 0,            // +1 climbing, -1 descending (from W/S)
-  turn: 0,                  // -1 left, +1 right (from A/D)
-};
+const CAMERA_PITCH = 78;              // degrees from straight down, i.e. 12° below the horizon
+const MIN_ALT = 20, MAX_ALT = 12000;  // metres
+const TURN_RATE = 0.6;                // rad/s
+const MM_RADIUS_KM = 120;             // half-extent shown on the minimap
+const PROXIMITY_MS = 1000;            // how often to look for a closer station
+const STREAM_START_TIMEOUT_MS = 12000;
 
-let currentStation = null;
-let muted = false;
-// stations that failed to play this session — skipped when picking next
-const deadStationUrls = new Set();
-
-// ---------- Preset locations ----------
 const PRESETS = [
   { name: "Tokyo",       lat: 35.68,  lon: 139.69 },
   { name: "Paris",       lat: 48.86,  lon: 2.35 },
@@ -227,44 +236,83 @@ const PRESETS = [
   { name: "Mumbai",      lat: 19.08,  lon: 72.88 },
 ];
 
+let stations = [];          // geo-tagged stations, s.id === index
+let map = null;
+let mapReady = false;
+let flying = false;
+let pendingStart = null;    // a start requested before the station list arrived
+
+const state = {
+  lon: 0, lat: 0,           // degrees
+  altitude: 200,            // metres
+  heading: 0,               // radians, 0 = north, clockwise
+  speedKph: 500,
+  climb: 0,                 // +1 climbing, -1 descending
+  turn: 0,                  // -1 left, +1 right
+};
+
+let currentStation = null;
+const deadStationUrls = new Set();   // streams that failed this session
+
+const $ = (id) => document.getElementById(id);
+const toRad = (d) => d * Math.PI / 180;
+const toDeg = (r) => r * 180 / Math.PI;
+const wrapLon = (lon) => ((lon + 540) % 360) - 180;
+
 // ====================================================================
 //  STATION LOADING
 // ====================================================================
-async function pickRadioServer() {
-  // de1 is a reliable named server per the API docs
-  return "https://de1.api.radio-browser.info";
+async function fetchStationList() {
+  let lastErr;
+  for (const server of RADIO_SERVERS) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    try {
+      const res = await fetch(server +
+        "/json/stations/search?has_geo_info=true&hidebroken=true" +
+        "&order=clickcount&reverse=true&limit=40000", { signal: ctrl.signal });
+      clearTimeout(timer);  // only time out the connection, not the big download
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return await res.json();
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e;
+      console.warn("Station server failed:", server, e);
+    }
+  }
+  throw lastErr;
 }
 
 async function loadStations() {
-  const status = document.getElementById("loadStatus");
+  const status = $("loadStatus");
   try {
-    const server = await pickRadioServer();
-    status.textContent = "Fetching global station list…";
-    // Only stations with coordinates and that are currently OK.
-    const url = server +
-      "/json/stations/search?has_geo_info=true&hidebroken=true&limit=30000";
-    const res = await fetch(url, {
-      headers: { "User-Agent": USER_AGENT_APP }
-    });
-    const data = await res.json();
-    stations = data
-      .filter(s => s.geo_lat && s.geo_long && s.url_resolved &&
-                   Math.abs(s.geo_lat) <= 90 && Math.abs(s.geo_long) <= 180)
-      .map(s => ({
-        name: s.name ? s.name.trim() : "Unknown station",
-        lat: s.geo_lat, lon: s.geo_long,
+    const data = await fetchStationList();
+    const seenUrls = new Set();
+    stations = [];
+    for (const s of data) {
+      const lat = Number(s.geo_lat), lon = Number(s.geo_long);
+      if (s.geo_lat == null || s.geo_long == null || !isFinite(lat) || !isFinite(lon)) continue;
+      if (Math.abs(lat) > 90 || Math.abs(lon) > 180 || (lat === 0 && lon === 0)) continue;
+      if (!s.url_resolved || seenUrls.has(s.url_resolved)) continue;
+      seenUrls.add(s.url_resolved);
+      stations.push({
+        id: stations.length,
+        name: (s.name || "").trim() || "Unknown station",
+        lat, lon,
         url: s.url_resolved,
         country: s.country || "",
         state: s.state || "",
         tags: s.tags || "",
         codec: s.codec || "",
         bitrate: s.bitrate || 0,
-        homepage: s.homepage || ""
-      }));
+      });
+    }
+    indexStations();
     status.textContent = stations.length.toLocaleString() + " geo-located stations loaded.";
-    const btn = document.getElementById("goBtn");
+    const btn = $("goBtn");
     btn.disabled = false;
     btn.textContent = "Start flying ▸";
+    if (pendingStart) startFlight(pendingStart.lat, pendingStart.lon);
   } catch (e) {
     status.textContent = "Couldn't load stations. Check your connection and reload.";
     console.error(e);
@@ -272,175 +320,277 @@ async function loadStations() {
 }
 
 // ====================================================================
-//  GEO HELPERS
+//  GEO HELPERS + SPATIAL INDEX
 // ====================================================================
 function haversineKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 +
-            Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) *
-            Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// find nearest station to current position, optionally skipping known-dead ones
-function nearestStation(excludeDead = true) {
-  let best = null, bestD = Infinity;
+// 1°×1° buckets so per-frame lookups don't scan every station.
+const grid = new Map();
+const cellKey = (latI, lonI) => latI * 360 + ((lonI % 360) + 360) % 360;
+
+function indexStations() {
+  grid.clear();
   for (const s of stations) {
-    if (excludeDead && deadStationUrls.has(s.url)) continue;
-    const d = haversineKm(state.lat, state.lon, s.lat, s.lon);
-    if (d < bestD) { bestD = d; best = s; }
+    const key = cellKey(Math.min(179, Math.floor(s.lat + 90)), Math.floor(s.lon + 180));
+    let bucket = grid.get(key);
+    if (!bucket) grid.set(key, bucket = []);
+    bucket.push(s);
   }
-  if (!best && excludeDead) return nearestStation(false); // all nearby are dead, allow retry
-  return best ? { station: best, dist: bestD } : null;
 }
 
-// stations within radiusKm (for minimap + globe dots)
 function stationsWithin(radiusKm) {
   const out = [];
-  for (const s of stations) {
-    const d = haversineKm(state.lat, state.lon, s.lat, s.lon);
-    if (d <= radiusKm) out.push({ s, d });
+  const dLat = radiusKm / 111;
+  const latLo = Math.max(0, Math.floor(state.lat - dLat + 90));
+  const latHi = Math.min(179, Math.floor(state.lat + dLat + 90));
+  const edgeLat = Math.min(89.9, Math.abs(state.lat) + dLat);
+  const dLon = radiusKm / (111 * Math.cos(toRad(edgeLat)));
+  let lonLo = Math.floor(state.lon - dLon + 180);
+  let lonHi = Math.floor(state.lon + dLon + 180);
+  if (lonHi - lonLo >= 359) { lonLo = 0; lonHi = 359; }
+  for (let la = latLo; la <= latHi; la++) {
+    for (let lo = lonLo; lo <= lonHi; lo++) {
+      const bucket = grid.get(cellKey(la, lo));
+      if (!bucket) continue;
+      for (const s of bucket) {
+        const d = haversineKm(state.lat, state.lon, s.lat, s.lon);
+        if (d <= radiusKm) out.push({ s, d });
+      }
+    }
   }
   return out;
+}
+
+// nearest station that isn't known to be dead
+function nearestStation() {
+  for (const r of [25, 100, 400, 1500, 5000]) {
+    let best = null;
+    for (const c of stationsWithin(r)) {
+      if (!deadStationUrls.has(c.s.url) && (!best || c.d < best.d)) best = c;
+    }
+    if (best) return { station: best.s, dist: best.d };
+  }
+  let best = null;  // middle of an ocean: fall back to a full scan
+  for (const s of stations) {
+    if (deadStationUrls.has(s.url)) continue;
+    const d = haversineKm(state.lat, state.lon, s.lat, s.lon);
+    if (!best || d < best.dist) best = { station: s, dist: d };
+  }
+  return best;
 }
 
 // ====================================================================
 //  AUDIO
 // ====================================================================
-const player = document.getElementById("player");
-const skipBtn = document.getElementById("skipBtn");
+const player = $("player");
+const skipBtn = $("skipBtn");
+let loadId = 0;             // bumps on every station change; stale callbacks compare against it
+let startTimer = null;
+let needsGesture = false;   // browser blocked autoplay; wait for a click / key press
+
+function armStartTimer(id) {
+  clearTimeout(startTimer);
+  startTimer = setTimeout(() => {
+    if (id === loadId && !needsGesture) markStationDead("Station isn't responding");
+  }, STREAM_START_TIMEOUT_MS);
+}
+
+function tryPlay(id) {
+  player.play().catch((err) => {
+    if (id !== loadId) return;                 // a newer station replaced this one
+    if (err.name === "NotAllowedError") {
+      needsGesture = true;
+      clearTimeout(startTimer);
+      setNPStatus("Click or press any key to start the audio");
+    } else if (err.name !== "AbortError") {
+      markStationDead("Stream wouldn't start");
+    }
+  });
+}
 
 function playStation(s, dist) {
+  const prev = currentStation;
   currentStation = s;
-  skipBtn.classList.remove("show");
+  const id = ++loadId;
   player.src = s.url;
-  if (!muted) {
-    player.play().catch(() => markStationDead("Stream wouldn't start (station may be offline)"));
-  }
+  armStartTimer(id);
+  tryPlay(id);
   updateNowPlaying(s, dist);
+  setStationFeatureState(prev, { current: false });
+  setStationFeatureState(s, { current: true });
 }
+
+function resumeAudioFromGesture() {
+  if (!needsGesture || !currentStation) return;
+  needsGesture = false;
+  setNPStatus("Tuning in…");
+  armStartTimer(loadId);
+  tryPlay(loadId);
+}
+window.addEventListener("pointerdown", resumeAudioFromGesture);
+window.addEventListener("keydown", resumeAudioFromGesture);
 
 function markStationDead(reason) {
   if (!currentStation) return;
+  clearTimeout(startTimer);
   deadStationUrls.add(currentStation.url);
-  setNPStatus(reason + " — tap skip for the next one");
-  document.getElementById("npTitle").classList.add("dead");
-  skipBtn.classList.add("show");
+  setStationFeatureState(currentStation, { dead: true });
+  // stop a late-loading stream from suddenly starting after we gave up on it
+  player.removeAttribute("src");
+  player.load();
+  setNPStatus(reason + " — skip to the next station.");
+  $("npTitle").classList.add("dead");
+  $("nowPlaying").classList.add("isDead");
+  skipBtn.hidden = false;
 }
 
 function skipToNextStation() {
-  const near = nearestStation();
+  const near = nearestStation();   // excludes the dead station we're on
   if (near) playStation(near.station, near.dist);
 }
-
 skipBtn.onclick = skipToNextStation;
 
-player.addEventListener("error", () => markStationDead("Stream failed"));
-player.addEventListener("stalled", () => markStationDead("Stream stalled"));
+player.addEventListener("playing", () => {
+  clearTimeout(startTimer);
+  if (currentStation && !deadStationUrls.has(currentStation.url)) setNPStatus("");
+});
+player.addEventListener("error", () => {
+  // ignore errors from a src we've already moved away from
+  if (currentStation && player.getAttribute("src") === currentStation.url) {
+    markStationDead("Stream failed");
+  }
+});
+player.addEventListener("ended", () => {
+  if (currentStation && player.getAttribute("src") === currentStation.url) {
+    markStationDead("Stream ended");
+  }
+});
 
-function setNPStatus(txt) {
-  document.getElementById("npStatus").textContent = txt;
-}
-
-function updateNowPlaying(s, dist) {
-  const np = document.getElementById("nowPlaying");
-  document.getElementById("npTitle").classList.remove("dead");
-  document.getElementById("npName").textContent = s.name;
-  const loc = [s.state, s.country].filter(Boolean).join(", ") || "Location unknown";
-  const genre = s.tags ? s.tags.split(",").slice(0,3).join(", ") : "—";
-  const quality = s.bitrate ? `${s.codec} ${s.bitrate}kbps` : (s.codec || "—");
-  document.getElementById("npMeta").innerHTML =
-    `<span class="k">Location:</span> ${loc}<br>` +
-    `<span class="k">Genre:</span> ${genre}<br>` +
-    `<span class="k">Stream:</span> ${quality}<br>` +
-    `<span class="k">Distance:</span> ${dist.toFixed(0)} km away`;
-  setNPStatus("");
-  np.classList.add("show");
-}
-
-// ICY "now playing" metadata is blocked cross-origin in browsers,
-// so song titles aren't reliably available. We surface it only if a
-// station happens to expose it via the media session (rare).
-navigator.mediaSession && navigator.mediaSession.setActionHandler &&
-  (() => {})();
-
-document.getElementById("muteBtn").onclick = () => {
-  muted = !muted;
-  const btn = document.getElementById("muteBtn");
-  if (muted) { player.pause(); btn.textContent = "🔇 Unmute"; }
-  else { player.play().catch(() => markStationDead("Stream wouldn't start (station may be offline)")); btn.textContent = "🔊 Mute"; }
+$("muteBtn").onclick = () => {
+  player.muted = !player.muted;   // keeps the stream live instead of pausing it
+  $("muteBtn").textContent = player.muted ? "🔇 Unmute" : "🔊 Mute";
 };
 
 // ====================================================================
-//  PROXIMITY CHECK  (every 5s — local math, no network)
+//  NOW-PLAYING CARD
+// ====================================================================
+function setNPStatus(txt) {
+  $("npStatus").textContent = txt;
+}
+
+function formatDist(d) {
+  return (d < 10 ? d.toFixed(1) : Math.round(d).toLocaleString()) + " km away";
+}
+
+function updateNowPlaying(s, dist) {
+  const loc = [s.state, s.country].filter(Boolean).join(", ") || "Location unknown";
+  $("npName").textContent = s.name;
+  $("npName").title = s.name;
+  $("npLoc").textContent = loc;
+  $("npGenre").textContent = s.tags ? s.tags.split(",").slice(0, 3).join(", ") : "—";
+  $("npStream").textContent = s.bitrate ? `${s.codec} ${s.bitrate}kbps` : (s.codec || "—");
+  $("npDist").textContent = formatDist(dist);
+  $("npTitle").classList.remove("dead");
+  $("nowPlaying").classList.remove("isDead");
+  skipBtn.hidden = true;
+  setNPStatus(needsGesture ? "Click or press any key to start the audio" : "Tuning in…");
+  $("nowPlaying").classList.add("show");
+
+  if ("mediaSession" in navigator && window.MediaMetadata) {
+    navigator.mediaSession.metadata = new MediaMetadata({ title: s.name, artist: loc, album: "Radio Flight" });
+  }
+}
+
+// ====================================================================
+//  PROXIMITY CHECK — local math, no network
 // ====================================================================
 function checkProximity() {
   const near = nearestStation();
   if (!near) return;
-  // switch only if it's a genuinely different station
-  if (!currentStation || near.station.url !== currentStation.url) {
+  if (!currentStation) {
+    playStation(near.station, near.dist);
+    return;
+  }
+  const curDist = haversineKm(state.lat, state.lon, currentStation.lat, currentStation.lon);
+  // Require a clear margin so we don't flap between two stations at a boundary.
+  // A dead station stays put until you skip it or fly nearer another one.
+  if (near.station !== currentStation && near.dist < curDist - Math.max(1, curDist * 0.1)) {
     playStation(near.station, near.dist);
   } else {
-    // same station, just refresh distance readout
-    updateNowPlaying(near.station, near.dist);
+    $("npDist").textContent = formatDist(curDist);
   }
 }
 
 // ====================================================================
 //  MINIMAP
 // ====================================================================
-const mm = document.getElementById("minimap");
-const mmCtx = mm.getContext("2d");
-const MM_RADIUS_KM = 120;     // half-extent shown on minimap
+const mm = $("minimap");
 const MM_SIZE = 190;
 const MM_C = MM_SIZE / 2;
+const dpr = window.devicePixelRatio || 1;
+mm.width = MM_SIZE * dpr;
+mm.height = MM_SIZE * dpr;
+const mmCtx = mm.getContext("2d");
+mmCtx.scale(dpr, dpr);
 
 function drawMinimap() {
   mmCtx.clearRect(0, 0, MM_SIZE, MM_SIZE);
+  mmCtx.save();
+  mmCtx.beginPath();
+  mmCtx.arc(MM_C, MM_C, MM_C, 0, Math.PI * 2);
+  mmCtx.clip();
 
-  // background grid rings
+  // range rings + crosshair
   mmCtx.strokeStyle = "rgba(124,252,154,0.15)";
   mmCtx.lineWidth = 1;
   for (let r = 1; r <= 3; r++) {
     mmCtx.beginPath();
-    mmCtx.arc(MM_C, MM_C, (MM_C - 6) * r/3, 0, Math.PI*2);
+    mmCtx.arc(MM_C, MM_C, (MM_C - 6) * r / 3, 0, Math.PI * 2);
     mmCtx.stroke();
   }
-  // crosshair
   mmCtx.beginPath();
-  mmCtx.moveTo(MM_C, 6); mmCtx.lineTo(MM_C, MM_SIZE-6);
-  mmCtx.moveTo(6, MM_C); mmCtx.lineTo(MM_SIZE-6, MM_C);
+  mmCtx.moveTo(MM_C, 6); mmCtx.lineTo(MM_C, MM_SIZE - 6);
+  mmCtx.moveTo(6, MM_C); mmCtx.lineTo(MM_SIZE - 6, MM_C);
   mmCtx.stroke();
 
-  // station dots — rotate so heading points "up"
-  const within = stationsWithin(MM_RADIUS_KM);
-  const cosH = Math.cos(-state.heading);
-  const sinH = Math.sin(-state.heading);
-  const kmPerDegLat = 111;
-  const kmPerDegLon = 111 * Math.cos(state.lat * Math.PI/180);
-
-  for (const { s } of within) {
-    // east/north offset in km
-    const east  = (s.lon - state.lon) * kmPerDegLon;
-    const north = (s.lat - state.lat) * kmPerDegLat;
-    // rotate into heading-up frame
-    const rx = east * cosH - north * sinH;
-    const ry = east * sinH + north * cosH;
-    const px = MM_C + (rx / MM_RADIUS_KM) * (MM_C - 8);
-    const py = MM_C - (ry / MM_RADIUS_KM) * (MM_C - 8);
-    const isCurrent = currentStation && s.url === currentStation.url;
-    const isDead = deadStationUrls.has(s.url);
+  // station dots, rotated so the heading points up
+  const cosH = Math.cos(state.heading);
+  const sinH = Math.sin(state.heading);
+  const kmPerDegLon = 111 * Math.cos(toRad(state.lat));
+  const scale = (MM_C - 8) / MM_RADIUS_KM;
+  let current = null;
+  for (const { s } of stationsWithin(MM_RADIUS_KM)) {
+    const east  = wrapLon(s.lon - state.lon) * kmPerDegLon;
+    const north = (s.lat - state.lat) * 111;
+    const right   = east * cosH - north * sinH;
+    const forward = east * sinH + north * cosH;
+    const px = MM_C + right * scale;
+    const py = MM_C - forward * scale;
+    if (currentStation && s === currentStation) { current = { px, py }; continue; }
     mmCtx.beginPath();
-    mmCtx.arc(px, py, isCurrent ? 4 : 2.5, 0, Math.PI*2);
-    mmCtx.fillStyle = isDead ? "#ff5c5c" : (isCurrent ? "#bfffcc" : "#7CFC9A");
-    if (isCurrent) { mmCtx.shadowColor = isDead ? "#ff5c5c" : "#7CFC9A"; mmCtx.shadowBlur = 8; }
+    mmCtx.arc(px, py, 2.5, 0, Math.PI * 2);
+    mmCtx.fillStyle = deadStationUrls.has(s.url) ? "#ff5c5c" : "#7CFC9A";
+    mmCtx.fill();
+  }
+  if (current) {  // drawn last so it sits on top
+    const color = deadStationUrls.has(currentStation.url) ? "#ff5c5c" : "#e6fff0";
+    mmCtx.beginPath();
+    mmCtx.arc(current.px, current.py, 4, 0, Math.PI * 2);
+    mmCtx.fillStyle = color;
+    mmCtx.shadowColor = color;
+    mmCtx.shadowBlur = 8;
     mmCtx.fill();
     mmCtx.shadowBlur = 0;
   }
+  mmCtx.restore();
 
-  // self — grey dot with heading triangle at center
+  // self: heading triangle at the centre
   mmCtx.fillStyle = "#c9d4dc";
   mmCtx.beginPath();
   mmCtx.moveTo(MM_C, MM_C - 7);
@@ -451,174 +601,191 @@ function drawMinimap() {
 }
 
 // ====================================================================
-//  CESIUM SETUP + FLIGHT LOOP
+//  MAP + FLIGHT LOOP
 // ====================================================================
-async function makeBaseLayer() {
-  // Public tile servers like OSM and Esri's raw ArcGIS endpoints display
-  // fine as plain <img> tags but commonly omit the CORS headers WebGL
-  // needs to upload them as textures, so the globe attaches the layer
-  // but renders blank. Cesium's own Ion CDN is built to support this and
-  // sends correct CORS headers, so we use Ion's default world imagery via
-  // the bundled demo access token instead of a raw tile URL template.
-  try {
-    return await Cesium.createWorldImageryAsync();
-  } catch (e) {
-    console.error("Ion imagery failed, falling back to Esri", e);
-    return Cesium.ImageryLayer.fromProviderAsync(
-      Cesium.IonImageryProvider.fromAssetId(3) // Esri World Imagery hosted on Ion (CORS-correct)
-    );
+const STATION_COLOR = [
+  "case",
+  ["boolean", ["feature-state", "dead"], false], "#ff5c5c",
+  ["boolean", ["feature-state", "current"], false], "#e6fff0",
+  "#7CFC9A",
+];
+
+function stationPointsGeoJSON() {
+  return {
+    type: "FeatureCollection",
+    features: stations.map((s) => ({
+      type: "Feature", id: s.id, properties: {},
+      geometry: { type: "Point", coordinates: [s.lon, s.lat] },
+    })),
+  };
+}
+
+// small hexagons extruded into light beams so stations stand out at a low angle
+function stationBeamsGeoJSON() {
+  const R = 35;  // metres
+  return {
+    type: "FeatureCollection",
+    features: stations.map((s) => {
+      const dLat = R / 111320;
+      const dLon = R / (111320 * Math.max(0.05, Math.cos(toRad(s.lat))));
+      const ring = [];
+      for (let k = 0; k < 6; k++) {
+        const a = k * Math.PI / 3;
+        ring.push([s.lon + dLon * Math.cos(a), s.lat + dLat * Math.sin(a)]);
+      }
+      ring.push(ring[0]);
+      return { type: "Feature", id: s.id, properties: {}, geometry: { type: "Polygon", coordinates: [ring] } };
+    }),
+  };
+}
+
+function setStationFeatureState(s, featureState) {
+  if (!s || !mapReady) return;
+  for (const source of ["stations", "beams"]) {
+    map.setFeatureState({ source, id: s.id }, featureState);
   }
 }
 
-async function initViewer() {
-  const baseImagery = await makeBaseLayer();
-
-  viewer = new Cesium.Viewer("cesiumContainer", {
-    baseLayer: baseImagery,
-    baseLayerPicker: false,
-    geocoder: false,
-    homeButton: false,
-    sceneModePicker: false,
-    navigationHelpButton: false,
-    animation: false,
-    timeline: false,
-    fullscreenButton: false,
-    infoBox: false,
-    selectionIndicator: false,
-    requestRenderMode: false,
+function initMap() {
+  map = new maplibregl.Map({
+    container: "map",
+    interactive: false,          // the flight controls drive the camera
+    maxPitch: 85,
+    attributionControl: false,
+    center: [state.lon, state.lat],
+    zoom: 14,
+    style: {
+      version: 8,
+      sources: {
+        imagery: {
+          type: "raster", tiles: [IMAGERY_URL], tileSize: 256, maxzoom: 18,
+          attribution: "Imagery © Esri, Maxar, Earthstar Geographics",
+        },
+        stations: { type: "geojson", data: stationPointsGeoJSON() },
+        beams: { type: "geojson", data: stationBeamsGeoJSON() },
+      },
+      sky: {
+        "sky-color": "#5fa8e8",
+        "horizon-color": "#d6e9f7",
+        "fog-color": "#d6e9f7",
+        "sky-horizon-blend": 0.5,
+        "horizon-fog-blend": 0.5,
+        "fog-ground-blend": 0.6,
+      },
+      layers: [
+        { id: "imagery", type: "raster", source: "imagery" },
+        {
+          id: "beams", type: "fill-extrusion", source: "beams", minzoom: 9,
+          paint: {
+            "fill-extrusion-color": STATION_COLOR,
+            "fill-extrusion-height": 500,
+            "fill-extrusion-opacity": 0.45,
+          },
+        },
+        {
+          id: "stations", type: "circle", source: "stations",
+          paint: {
+            "circle-color": STATION_COLOR,
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 2, 10, 4, 15, 7],
+            "circle-stroke-color": "#042713",
+            "circle-stroke-width": 1,
+            "circle-opacity": 0.9,
+            "circle-pitch-alignment": "viewport",
+            "circle-pitch-scale": "map",
+          },
+        },
+      ],
+    },
   });
-
-  viewer.scene.screenSpaceCameraController.enableInputs = false; // we drive the camera
-  viewer.scene.globe.enableLighting = false;
-  viewer.scene.skyAtmosphere.show = true;
-  viewer.scene.fog.enabled = true;
-}
-
-// station dots on the globe (green discs sized for plane-altitude visibility)
-let dotsDataSource = null;
-function refreshGlobeDots() {
-  if (!dotsDataSource) {
-    dotsDataSource = new Cesium.CustomDataSource("stationDots");
-    viewer.dataSources.add(dotsDataSource);
-  }
-  dotsDataSource.entities.removeAll();
-  // Only draw dots within a sensible radius so we don't spawn thousands.
-  const within = stationsWithin(300);
-  for (const { s } of within) {
-    const isCurrent = currentStation && s.url === currentStation.url;
-    const isDead = deadStationUrls.has(s.url);
-    const baseColor = isDead ? "#ff5c5c" : "#7CFC9A";
-    dotsDataSource.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(s.lon, s.lat, 0),
-      ellipse: {
-        semiMinorAxis: 600,   // ~600 m radius disc on the ground
-        semiMajorAxis: 600,
-        height: 0,
-        material: isCurrent
-          ? Cesium.Color.fromCssColorString(isDead ? "#ffbfbf" : "#bfffcc").withAlpha(0.85)
-          : Cesium.Color.fromCssColorString(baseColor).withAlpha(0.55),
-        outline: true,
-        outlineColor: Cesium.Color.fromCssColorString(baseColor),
-      }
-    });
-    // vertical beam so it's spottable from altitude
-    dotsDataSource.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(s.lon, s.lat, 250),
-      cylinder: {
-        length: 500, topRadius: 60, bottomRadius: 60,
-        material: Cesium.Color.fromCssColorString(baseColor).withAlpha(0.25),
-      }
-    });
-  }
+  map.addControl(new maplibregl.AttributionControl({ compact: true }), "top-right");
+  map.on("load", () => {
+    mapReady = true;
+    for (const url of deadStationUrls) {
+      const s = stations.find((x) => x.url === url);
+      setStationFeatureState(s, { dead: true });
+    }
+    setStationFeatureState(currentStation, { current: true });
+  });
+  map.on("error", (e) => console.warn("Map error:", e.error || e));
+  updateCamera();
 }
 
 function updateCamera() {
-  const carto = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.altitude);
-  viewer.camera.setView({
-    destination: carto,
-    orientation: {
-      heading: state.heading,
-      pitch: Cesium.Math.toRadians(-12),   // slight downward look
-      roll: 0,
-    }
-  });
+  const cam = map.calculateCameraOptionsFromCameraLngLatAltRotation(
+    [state.lon, state.lat], state.altitude, toDeg(state.heading), CAMERA_PITCH);
+  // Pass fields explicitly: jumpTo throws on the undefined `roll` this helper returns.
+  map.jumpTo({ center: cam.center, zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch });
 }
 
-// main per-frame update
 let lastT = performance.now();
 function frame(now) {
-  if (!flying) return;
   const dt = Math.min((now - lastT) / 1000, 0.1);  // seconds, clamped
   lastT = now;
 
-  // turning (A/D)
-  const TURN_RATE = 0.6; // rad/s
   state.heading += state.turn * TURN_RATE * dt;
+  state.heading = ((state.heading % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
 
-  // climb / descend (W/S)
-  const CLIMB_RATE = 60; // m/s
-  state.altitude += state.pitchClimb * CLIMB_RATE * dt;
-  state.altitude = Math.max(20, Math.min(state.altitude, 12000));
+  const climbRate = 40 + state.altitude * 0.4;     // m/s, quicker when already high
+  state.altitude += state.climb * climbRate * dt;
+  state.altitude = Math.max(MIN_ALT, Math.min(state.altitude, MAX_ALT));
 
-  // forward motion along heading
-  const kph = state.speedKph;
-  const mPerS = kph * 1000 / 3600;
-  const distM = mPerS * dt;
-  // convert to lat/lon deltas
-  const dNorth = Math.cos(state.heading) * distM;
-  const dEast  = Math.sin(state.heading) * distM;
-  const kmPerDegLat = 111000;
-  const kmPerDegLon = 111000 * Math.cos(state.lat * Math.PI/180) || 1;
-  state.lat += dNorth / kmPerDegLat;
-  state.lon += dEast / kmPerDegLon;
-  // wrap longitude
-  if (state.lon > 180) state.lon -= 360;
-  if (state.lon < -180) state.lon += 360;
-  state.lat = Math.max(-85, Math.min(85, state.lat));
+  const distM = state.speedKph / 3.6 * dt;
+  state.lat += Math.cos(state.heading) * distM / 111320;
+  state.lon += Math.sin(state.heading) * distM / (111320 * Math.max(0.01, Math.cos(toRad(state.lat))));
+  state.lon = wrapLon(state.lon);
+  state.lat = Math.max(-84, Math.min(84, state.lat));   // web-mercator limit
 
   updateCamera();
   drawMinimap();
-
-  document.getElementById("altReadout").textContent =
-    "ALT " + Math.round(state.altitude).toLocaleString() + " m";
+  $("altReadout").textContent =
+    "ALT " + Math.round(state.altitude).toLocaleString() + " m · HDG " +
+    String(Math.round(toDeg(state.heading)) % 360).padStart(3, "0") + "°";
 
   requestAnimationFrame(frame);
 }
 
-// redraw globe dots less often (they're expensive); every 2s
-let dotTimer = null;
-
 // ====================================================================
 //  INPUT
 // ====================================================================
+const KEY_ACTIONS = {
+  w: "up", arrowup: "up", s: "down", arrowdown: "down",
+  a: "left", arrowleft: "left", d: "right", arrowright: "right",
+};
+const heldKeys = new Set();
+
+function syncControls() {
+  state.climb = (heldKeys.has("up") ? 1 : 0) - (heldKeys.has("down") ? 1 : 0);
+  state.turn = (heldKeys.has("right") ? 1 : 0) - (heldKeys.has("left") ? 1 : 0);
+}
+
 window.addEventListener("keydown", (e) => {
-  if (!flying) return;
-  switch (e.key.toLowerCase()) {
-    case "w": state.pitchClimb = 1; break;
-    case "s": state.pitchClimb = -1; break;
-    case "a": state.turn = -1; break;
-    case "d": state.turn = 1; break;
-  }
+  if (!flying || (e.target.tagName === "INPUT" && e.target.type === "text")) return;
+  const action = KEY_ACTIONS[e.key.toLowerCase()];
+  if (!action) return;
+  e.preventDefault();   // also stops arrow keys from nudging a focused slider
+  heldKeys.add(action);
+  syncControls();
 });
 window.addEventListener("keyup", (e) => {
-  switch (e.key.toLowerCase()) {
-    case "w": case "s": state.pitchClimb = 0; break;
-    case "a": case "d": state.turn = 0; break;
-  }
+  const action = KEY_ACTIONS[e.key.toLowerCase()];
+  if (!action) return;
+  heldKeys.delete(action);
+  syncControls();
 });
+window.addEventListener("blur", () => { heldKeys.clear(); syncControls(); });
 
-const slider = document.getElementById("speedSlider");
+const slider = $("speedSlider");
 slider.addEventListener("input", () => {
   state.speedKph = parseInt(slider.value, 10);
-  document.getElementById("speedVal").textContent = state.speedKph;
+  $("speedVal").textContent = state.speedKph.toLocaleString();
 });
 
 // ====================================================================
 //  START
 // ====================================================================
 function buildPresets() {
-  const wrap = document.getElementById("presets");
-  PRESETS.forEach(p => {
+  const wrap = $("presets");
+  PRESETS.forEach((p) => {
     const b = document.createElement("button");
     b.className = "preset";
     b.textContent = p.name;
@@ -631,53 +798,60 @@ function buildPresets() {
 async function geocode(q) {
   try {
     const r = await fetch(
-      "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
-      encodeURIComponent(q),
-      { headers: { "Accept-Language": "en" } }
-    );
+      "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q),
+      { headers: { "Accept-Language": "en" } });
+    if (!r.ok) throw new Error("HTTP " + r.status);
     const d = await r.json();
     if (d && d.length) return { lat: parseFloat(d[0].lat), lon: parseFloat(d[0].lon) };
   } catch (e) { console.error(e); }
   return null;
 }
 
-document.getElementById("locInput").addEventListener("keydown", async (e) => {
-  if (e.key === "Enter") {
-    const q = e.target.value.trim();
-    if (!q) return;
-    const status = document.getElementById("loadStatus");
-    status.textContent = "Finding " + q + "…";
-    const g = await geocode(q);
-    if (g) startFlight(g.lat, g.lon);
-    else status.textContent = "Couldn't find that place — try another or pick a preset.";
-  }
+async function startFromTypedPlace() {
+  const q = $("locInput").value.trim();
+  if (!q) return false;
+  const status = $("loadStatus");
+  status.textContent = "Finding " + q + "…";
+  const g = await geocode(q);
+  if (g) startFlight(g.lat, g.lon);
+  else status.textContent = "Couldn't find that place — try another or pick a preset.";
+  return true;
+}
+
+$("locInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") startFromTypedPlace();
 });
 
-document.getElementById("goBtn").onclick = () => {
-  // default start = first preset if nothing typed
-  startFlight(PRESETS[0].lat, PRESETS[0].lon);
+$("goBtn").onclick = async () => {
+  if (!(await startFromTypedPlace())) startFlight(PRESETS[0].lat, PRESETS[0].lon);
 };
 
-async function startFlight(lat, lon) {
-  if (!stations.length) return;
-  state.lat = lat; state.lon = lon;
+function startFlight(lat, lon) {
+  if (flying) return;
+  if (!window.maplibregl) {
+    $("loadStatus").textContent = "The map library didn't load. Check your connection and reload.";
+    return;
+  }
+  if (!stations.length) {
+    pendingStart = { lat, lon };
+    $("loadStatus").textContent = "Still loading stations — you'll take off as soon as they're ready.";
+    return;
+  }
+  pendingStart = null;
+  flying = true;
+  state.lat = lat;
+  state.lon = lon;
   state.altitude = 200;
   state.heading = 0;
   state.speedKph = parseInt(slider.value, 10);
 
-  document.getElementById("startup").style.display = "none";
+  $("startup").style.display = "none";
+  initMap();
 
-  if (!viewer) await initViewer();
-  flying = true;
-  updateCamera();
-
-  // first station immediately
+  // Pick the first station right away so playback starts inside the click
+  // (browsers only allow autoplay with sound during a user gesture).
   checkProximity();
-  refreshGlobeDots();
-
-  // periodic checks
-  setInterval(checkProximity, 5000);     // proximity re-check every 5s
-  dotTimer = setInterval(refreshGlobeDots, 2000);
+  setInterval(checkProximity, PROXIMITY_MS);
 
   lastT = performance.now();
   requestAnimationFrame(frame);
